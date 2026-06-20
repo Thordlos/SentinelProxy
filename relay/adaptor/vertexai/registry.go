@@ -4,10 +4,10 @@ import (
 	"net/http"
 
 	"github.com/gin-gonic/gin"
-	claude "github.com/songquanpeng/one-api/relay/adaptor/vertexai/claude"
-	gemini "github.com/songquanpeng/one-api/relay/adaptor/vertexai/gemini"
-	"github.com/songquanpeng/one-api/relay/meta"
-	"github.com/songquanpeng/one-api/relay/model"
+	claude "github.com/sentinelproxy/sentinelproxy/relay/adaptor/vertexai/claude"
+	gemini "github.com/sentinelproxy/sentinelproxy/relay/adaptor/vertexai/gemini"
+	"github.com/sentinelproxy/sentinelproxy/relay/meta"
+	"github.com/sentinelproxy/sentinelproxy/relay/model"
 )
 
 type VertexAIModelType int

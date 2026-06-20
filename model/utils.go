@@ -1,8 +1,8 @@
 package model
 
 import (
-	"github.com/songquanpeng/one-api/common/config"
-	"github.com/songquanpeng/one-api/common/logger"
+	"github.com/sentinelproxy/sentinelproxy/common/config"
+	"github.com/sentinelproxy/sentinelproxy/common/logger"
 	"sync"
 	"time"
 )

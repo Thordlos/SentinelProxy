@@ -1,4 +1,4 @@
-module github.com/songquanpeng/one-api
+module github.com/sentinelproxy/sentinelproxy
 
 go 1.20
 

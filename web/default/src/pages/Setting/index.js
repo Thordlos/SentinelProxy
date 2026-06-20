@@ -5,7 +5,6 @@ import SystemSetting from '../../components/SystemSetting';
 import { isRoot } from '../../helpers';
 import OtherSetting from '../../components/OtherSetting';
 import PersonalSetting from '../../components/PersonalSetting';
-import OperationSetting from '../../components/OperationSetting';
 
 const Setting = () => {
   const { t } = useTranslation();
@@ -22,14 +21,6 @@ const Setting = () => {
   ];
 
   if (isRoot()) {
-    panes.push({
-      menuItem: t('setting.tabs.operation'),
-      render: () => (
-        <Tab.Pane attached={false}>
-          <OperationSetting />
-        </Tab.Pane>
-      ),
-    });
     panes.push({
       menuItem: t('setting.tabs.system'),
       render: () => (

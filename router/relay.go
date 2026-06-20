@@ -1,8 +1,8 @@
 package router
 
 import (
-	"github.com/songquanpeng/one-api/controller"
-	"github.com/songquanpeng/one-api/middleware"
+	"github.com/sentinelproxy/sentinelproxy/controller"
+	"github.com/sentinelproxy/sentinelproxy/middleware"
 
 	"github.com/gin-gonic/gin"
 )

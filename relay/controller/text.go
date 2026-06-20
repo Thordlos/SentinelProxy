@@ -9,17 +9,19 @@ import (
 
 	"github.com/gin-gonic/gin"
 
-	"github.com/songquanpeng/one-api/common/config"
-	"github.com/songquanpeng/one-api/common/logger"
-	"github.com/songquanpeng/one-api/relay"
-	"github.com/songquanpeng/one-api/relay/adaptor"
-	"github.com/songquanpeng/one-api/relay/adaptor/openai"
-	"github.com/songquanpeng/one-api/relay/apitype"
-	"github.com/songquanpeng/one-api/relay/billing"
-	billingratio "github.com/songquanpeng/one-api/relay/billing/ratio"
-	"github.com/songquanpeng/one-api/relay/channeltype"
-	"github.com/songquanpeng/one-api/relay/meta"
-	"github.com/songquanpeng/one-api/relay/model"
+	"github.com/sentinelproxy/sentinelproxy/common/config"
+	"github.com/sentinelproxy/sentinelproxy/common/logger"
+	"github.com/sentinelproxy/sentinelproxy/relay"
+	"github.com/sentinelproxy/sentinelproxy/relay/adaptor"
+	"github.com/sentinelproxy/sentinelproxy/relay/adaptor/openai"
+	"github.com/sentinelproxy/sentinelproxy/relay/apitype"
+	"github.com/sentinelproxy/sentinelproxy/relay/billing"
+	billingratio "github.com/sentinelproxy/sentinelproxy/relay/billing/ratio"
+	"github.com/sentinelproxy/sentinelproxy/relay/channeltype"
+	"github.com/sentinelproxy/sentinelproxy/relay/meta"
+	"github.com/sentinelproxy/sentinelproxy/relay/model"
+	"github.com/sentinelproxy/sentinelproxy/relay/redaction"
+	"github.com/sentinelproxy/sentinelproxy/relay/relaymode"
 )
 
 func RelayTextHelper(c *gin.Context) *model.ErrorWithStatusCode {
@@ -32,6 +34,26 @@ func RelayTextHelper(c *gin.Context) *model.ErrorWithStatusCode {
 		return openai.ErrorWrapper(err, "invalid_text_request", http.StatusBadRequest)
 	}
 	meta.IsStream = textRequest.Stream
+
+	// ===== SentinelProxy: 请求脱敏 =====
+	if redaction.IsEnabled() && meta.Mode == relaymode.ChatCompletions {
+		sm := redaction.GetSessionManager()
+		state, err := sm.GetState(c)
+		if err != nil && redaction.Config().FailClosed {
+			logger.Errorf(ctx, "get masking state failed: %s", err.Error())
+			return openai.ErrorWrapper(err, "redaction_state_failed", http.StatusInternalServerError)
+		}
+		if state != nil {
+			if err := redaction.RedactRequest(textRequest, state); err != nil {
+				if redaction.Config().FailClosed {
+					logger.Errorf(ctx, "redact request failed: %s", err.Error())
+					return openai.ErrorWrapper(err, "redaction_failed", http.StatusInternalServerError)
+				}
+				logger.Warnf(ctx, "redact request failed (fail-open): %s", err.Error())
+			}
+		}
+	}
+	// ===================================
 
 	// map model name
 	meta.OriginModelName = textRequest.Model
@@ -59,9 +81,28 @@ func RelayTextHelper(c *gin.Context) *model.ErrorWithStatusCode {
 	adaptor.Init(meta)
 
 	// get request body
-	requestBody, err := getRequestBody(c, meta, textRequest, adaptor)
-	if err != nil {
-		return openai.ErrorWrapper(err, "convert_request_failed", http.StatusInternalServerError)
+	// SentinelProxy: 如果启用了脱敏，必须重新 marshal 请求体以包含脱敏后的内容
+	var requestBody io.Reader
+	if redaction.IsEnabled() {
+		convertedRequest, err := adaptor.ConvertRequest(c, meta.Mode, textRequest)
+		if err != nil {
+			return openai.ErrorWrapper(err, "convert_request_failed", http.StatusInternalServerError)
+		}
+		jsonData, err := json.Marshal(convertedRequest)
+		if err != nil {
+			return openai.ErrorWrapper(err, "marshal_request_failed", http.StatusInternalServerError)
+		}
+		requestBody = bytes.NewBuffer(jsonData)
+		if redaction.Config().LogRawRequests {
+			logger.Infof(c.Request.Context(), "[RAW REQUEST AFTER REDACTION] %s", string(jsonData))
+		} else {
+			logger.Debugf(c.Request.Context(), "converted request after redaction: \n%s", string(jsonData))
+		}
+	} else {
+		requestBody, err = getRequestBody(c, meta, textRequest, adaptor)
+		if err != nil {
+			return openai.ErrorWrapper(err, "convert_request_failed", http.StatusInternalServerError)
+		}
 	}
 
 	// do request
@@ -109,7 +150,11 @@ func getRequestBody(c *gin.Context, meta *meta.Meta, textRequest *model.GeneralO
 		logger.Debugf(c.Request.Context(), "converted request json_marshal_failed: %s\n", err.Error())
 		return nil, err
 	}
-	logger.Debugf(c.Request.Context(), "converted request: \n%s", string(jsonData))
+	if redaction.Config().LogRawRequests {
+		logger.Infof(c.Request.Context(), "[RAW REQUEST CONVERTED] %s", string(jsonData))
+	} else {
+		logger.Debugf(c.Request.Context(), "converted request: \n%s", string(jsonData))
+	}
 	requestBody = bytes.NewBuffer(jsonData)
 	return requestBody, nil
 }

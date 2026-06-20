@@ -4,8 +4,8 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/songquanpeng/one-api/common/config"
-	"github.com/songquanpeng/one-api/relay/model"
+	"github.com/sentinelproxy/sentinelproxy/common/config"
+	"github.com/sentinelproxy/sentinelproxy/relay/model"
 )
 
 func ShouldDisableChannel(err *model.Error, statusCode int) bool {

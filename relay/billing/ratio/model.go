@@ -6,7 +6,7 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/songquanpeng/one-api/common/logger"
+	"github.com/sentinelproxy/sentinelproxy/common/logger"
 )
 
 const (

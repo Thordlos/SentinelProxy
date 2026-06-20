@@ -1,0 +1,88 @@
+# SentinelProxy 脱敏配置
+
+# 是否启用脱敏
+enabled: true
+
+# 脱敏模块异常时是否阻断请求（fail-closed）
+fail_closed: true
+
+# 置信度阈值，低于此值的检测结果不处理
+score_threshold: 0.0
+
+# 单条文本最大处理长度（字节）
+max_text_length: 1048576
+
+# 会话状态过期时间（小时）
+cache_ttl_hours: 24
+
+# 会话状态持久化目录
+state_dir: logs/masking
+
+# 代号风格：typed | RAND
+# typed: 按实体类型编号，如 COMPANY_1, PHONE_NUMBER_2
+# RAND: 随机字符串，如 ENT_a3f9k2
+code_style: typed
+
+# RAND 模式下的默认前缀
+code_prefix: ENT
+
+# RAND 模式下的随机部分长度
+code_length: 6
+
+# 默认操作符
+default_operator:
+  type: replace
+
+# 是否记录原始请求/响应内容到日志（仅用于调试，会记录敏感信息）
+log_raw_requests: false
+
+# 启用的内置实体类型
+built_in_entities:
+  - ID_CARD
+  - PHONE_NUMBER
+  - EMAIL_ADDRESS
+  - BANK_CARD
+  - LICENSE_PLATE
+  - IP_ADDRESS
+
+# 自定义关键词规则（按关键词精确匹配）
+static_rules: []
+# static_rules:
+#   - id: sensitive_keyword
+#     name: 敏感关键词
+#     entity_type: SENSITIVE_KEYWORD
+#     keyword: "绝密"
+#     score: 1.0
+#     operator:
+#       type: replace
+
+# 自定义正则规则（按正则表达式匹配）
+dynamic_rules: []
+# dynamic_rules:
+#   - id: internal_project
+#     name: 内部项目代号
+#     entity_type: PROJECT_CODE
+#     pattern: 'PROJ-[A-Z]{2,4}-\d{4,6}'
+#     score: 1.0
+#     operator:
+#       type: replace
+#
+#   - id: sensitive_pattern
+#     name: 敏感关键词组合
+#     entity_type: SENSITIVE_KEYWORD
+#     pattern: '(机密|绝密|内部资料)'
+#     score: 1.0
+#     operator:
+#       type: replace
+#       new_value: "[SENSITIVE]"
+#
+#   - id: phone_mask
+#     name: 手机号部分掩码
+#     entity_type: PHONE_NUMBER
+#     pattern: '1[3-9]\d{9}'
+#     score: 1.0
+#     operator:
+#       type: mask
+#       mask_char: "*"
+#       chars_to_mask: 6
+#       from_end: false

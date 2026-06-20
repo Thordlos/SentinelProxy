@@ -3,7 +3,7 @@ package image
 import (
 	"bytes"
 	"encoding/base64"
-	"github.com/songquanpeng/one-api/common/client"
+	"github.com/sentinelproxy/sentinelproxy/common/client"
 	"image"
 	_ "image/gif"
 	_ "image/jpeg"

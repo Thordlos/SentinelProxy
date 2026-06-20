@@ -8,17 +8,17 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/songquanpeng/one-api/common/render"
+	"github.com/sentinelproxy/sentinelproxy/common/render"
 
-	"github.com/songquanpeng/one-api/common"
-	"github.com/songquanpeng/one-api/common/config"
-	"github.com/songquanpeng/one-api/common/helper"
-	"github.com/songquanpeng/one-api/common/image"
-	"github.com/songquanpeng/one-api/common/logger"
-	"github.com/songquanpeng/one-api/common/random"
-	"github.com/songquanpeng/one-api/relay/adaptor/openai"
-	"github.com/songquanpeng/one-api/relay/constant"
-	"github.com/songquanpeng/one-api/relay/model"
+	"github.com/sentinelproxy/sentinelproxy/common"
+	"github.com/sentinelproxy/sentinelproxy/common/config"
+	"github.com/sentinelproxy/sentinelproxy/common/helper"
+	"github.com/sentinelproxy/sentinelproxy/common/image"
+	"github.com/sentinelproxy/sentinelproxy/common/logger"
+	"github.com/sentinelproxy/sentinelproxy/common/random"
+	"github.com/sentinelproxy/sentinelproxy/relay/adaptor/openai"
+	"github.com/sentinelproxy/sentinelproxy/relay/constant"
+	"github.com/sentinelproxy/sentinelproxy/relay/model"
 
 	"github.com/gin-gonic/gin"
 )

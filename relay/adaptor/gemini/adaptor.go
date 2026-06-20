@@ -8,13 +8,13 @@ import (
 	"strings"
 
 	"github.com/gin-gonic/gin"
-	"github.com/songquanpeng/one-api/common/config"
-	"github.com/songquanpeng/one-api/common/helper"
-	channelhelper "github.com/songquanpeng/one-api/relay/adaptor"
-	"github.com/songquanpeng/one-api/relay/adaptor/openai"
-	"github.com/songquanpeng/one-api/relay/meta"
-	"github.com/songquanpeng/one-api/relay/model"
-	"github.com/songquanpeng/one-api/relay/relaymode"
+	"github.com/sentinelproxy/sentinelproxy/common/config"
+	"github.com/sentinelproxy/sentinelproxy/common/helper"
+	channelhelper "github.com/sentinelproxy/sentinelproxy/relay/adaptor"
+	"github.com/sentinelproxy/sentinelproxy/relay/adaptor/openai"
+	"github.com/sentinelproxy/sentinelproxy/relay/meta"
+	"github.com/sentinelproxy/sentinelproxy/relay/model"
+	"github.com/sentinelproxy/sentinelproxy/relay/relaymode"
 )
 
 type Adaptor struct {

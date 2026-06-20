@@ -2,7 +2,7 @@ package ratio
 
 import (
 	"encoding/json"
-	"github.com/songquanpeng/one-api/common/logger"
+	"github.com/sentinelproxy/sentinelproxy/common/logger"
 	"sync"
 )
 

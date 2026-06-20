@@ -9,17 +9,17 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/songquanpeng/one-api/common/client"
-	"github.com/songquanpeng/one-api/common/config"
-	"github.com/songquanpeng/one-api/common/logger"
-	"github.com/songquanpeng/one-api/model"
-	"github.com/songquanpeng/one-api/monitor"
-	"github.com/songquanpeng/one-api/relay/channeltype"
+	"github.com/sentinelproxy/sentinelproxy/common/client"
+	"github.com/sentinelproxy/sentinelproxy/common/config"
+	"github.com/sentinelproxy/sentinelproxy/common/logger"
+	"github.com/sentinelproxy/sentinelproxy/model"
+	"github.com/sentinelproxy/sentinelproxy/monitor"
+	"github.com/sentinelproxy/sentinelproxy/relay/channeltype"
 
 	"github.com/gin-gonic/gin"
 )
 
-// https://github.com/songquanpeng/one-api/issues/79
+// https://github.com/sentinelproxy/sentinelproxy/issues/79
 
 type OpenAISubscriptionResponse struct {
 	Object             string  `json:"object"`

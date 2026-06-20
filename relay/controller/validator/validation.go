@@ -2,8 +2,8 @@ package validator
 
 import (
 	"errors"
-	"github.com/songquanpeng/one-api/relay/model"
-	"github.com/songquanpeng/one-api/relay/relaymode"
+	"github.com/sentinelproxy/sentinelproxy/relay/model"
+	"github.com/sentinelproxy/sentinelproxy/relay/relaymode"
 	"math"
 )
 

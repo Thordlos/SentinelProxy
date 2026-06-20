@@ -2,11 +2,11 @@ package controller
 
 import (
 	"github.com/gin-gonic/gin"
-	"github.com/songquanpeng/one-api/common/config"
-	"github.com/songquanpeng/one-api/common/ctxkey"
-	"github.com/songquanpeng/one-api/common/helper"
-	"github.com/songquanpeng/one-api/common/random"
-	"github.com/songquanpeng/one-api/model"
+	"github.com/sentinelproxy/sentinelproxy/common/config"
+	"github.com/sentinelproxy/sentinelproxy/common/ctxkey"
+	"github.com/sentinelproxy/sentinelproxy/common/helper"
+	"github.com/sentinelproxy/sentinelproxy/common/random"
+	"github.com/sentinelproxy/sentinelproxy/model"
 	"net/http"
 	"strconv"
 )

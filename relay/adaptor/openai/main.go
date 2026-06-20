@@ -8,14 +8,14 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/songquanpeng/one-api/common/render"
-
 	"github.com/gin-gonic/gin"
-	"github.com/songquanpeng/one-api/common"
-	"github.com/songquanpeng/one-api/common/conv"
-	"github.com/songquanpeng/one-api/common/logger"
-	"github.com/songquanpeng/one-api/relay/model"
-	"github.com/songquanpeng/one-api/relay/relaymode"
+	"github.com/sentinelproxy/sentinelproxy/common"
+	"github.com/sentinelproxy/sentinelproxy/common/conv"
+	"github.com/sentinelproxy/sentinelproxy/common/logger"
+	"github.com/sentinelproxy/sentinelproxy/common/render"
+	"github.com/sentinelproxy/sentinelproxy/relay/model"
+	"github.com/sentinelproxy/sentinelproxy/relay/redaction"
+	"github.com/sentinelproxy/sentinelproxy/relay/relaymode"
 )
 
 const (
@@ -29,6 +29,13 @@ func StreamHandler(c *gin.Context, resp *http.Response, relayMode int) (*model.E
 	scanner := bufio.NewScanner(resp.Body)
 	scanner.Split(bufio.ScanLines)
 	var usage *model.Usage
+
+	// ===== SentinelProxy: 初始化流式恢复器 =====
+	var unmasker *redaction.StreamingUnmasker
+	if state := redaction.GetStateFromContext(c); state != nil {
+		unmasker = redaction.NewStreamingUnmasker(state)
+	}
+	// ============================================
 
 	common.SetEventStreamHeaders(c)
 
@@ -59,10 +66,42 @@ func StreamHandler(c *gin.Context, resp *http.Response, relayMode int) (*model.E
 				// but for empty choice and no usage, we should not pass it to client, this is for azure
 				continue // just ignore empty choice
 			}
-			render.StringData(c, data)
-			for _, choice := range streamResponse.Choices {
-				responseText += conv.AsString(choice.Delta.Content)
+
+			// ===== SentinelProxy: 流式实时恢复 =====
+			modified := false
+			for i := range streamResponse.Choices {
+				content := conv.AsString(streamResponse.Choices[i].Delta.Content)
+				if content != "" {
+					responseText += content
+					if unmasker != nil {
+						recovered := unmasker.Write(content)
+						streamResponse.Choices[i].Delta.Content = recovered
+						modified = true
+					}
+				}
+
+				// 处理 tool_calls 的 arguments
+				for j := range streamResponse.Choices[i].Delta.ToolCalls {
+					args := conv.AsString(streamResponse.Choices[i].Delta.ToolCalls[j].Function.Arguments)
+					if args != "" {
+						responseText += args
+						if unmasker != nil {
+							recovered := unmasker.Write(args)
+							streamResponse.Choices[i].Delta.ToolCalls[j].Function.Arguments = recovered
+							modified = true
+						}
+					}
+				}
 			}
+			if modified {
+				newJson, err := json.Marshal(streamResponse)
+				if err == nil {
+					data = dataPrefix + string(newJson)
+				}
+			}
+			// ========================================
+
+			render.StringData(c, data)
 			if streamResponse.Usage != nil {
 				usage = streamResponse.Usage
 			}
@@ -84,6 +123,18 @@ func StreamHandler(c *gin.Context, resp *http.Response, relayMode int) (*model.E
 		logger.SysError("error reading stream: " + err.Error())
 	}
 
+	// ===== SentinelProxy: flush 剩余 pending =====
+	if unmasker != nil {
+		remaining := unmasker.Flush()
+		if remaining != "" {
+			finalChunk := buildFinalStreamChunk(remaining)
+			if finalChunk != "" {
+				render.StringData(c, dataPrefix+finalChunk)
+			}
+		}
+	}
+	// =============================================
+
 	if !doneRendered {
 		render.Done(c)
 	}
@@ -93,7 +144,30 @@ func StreamHandler(c *gin.Context, resp *http.Response, relayMode int) (*model.E
 		return ErrorWrapper(err, "close_response_body_failed", http.StatusInternalServerError), "", nil
 	}
 
+	if redaction.Config().LogRawRequests {
+		logger.Infof(c.Request.Context(), "[RAW RESPONSE STREAM] %s", responseText)
+	}
+
 	return nil, responseText, usage
+}
+
+// buildFinalStreamChunk 构造一个包含剩余文本的 SSE chunk
+func buildFinalStreamChunk(text string) string {
+	resp := ChatCompletionsStreamResponse{
+		Choices: []ChatCompletionsStreamResponseChoice{
+			{
+				Delta: model.Message{
+					Role:    "assistant",
+					Content: text,
+				},
+			},
+		},
+	}
+	data, err := json.Marshal(resp)
+	if err != nil {
+		return ""
+	}
+	return string(data)
 }
 
 func Handler(c *gin.Context, resp *http.Response, promptTokens int, modelName string) (*model.ErrorWithStatusCode, *model.Usage) {
@@ -106,6 +180,21 @@ func Handler(c *gin.Context, resp *http.Response, promptTokens int, modelName st
 	if err != nil {
 		return ErrorWrapper(err, "close_response_body_failed", http.StatusInternalServerError), nil
 	}
+
+	// ===== SentinelProxy: 非流式响应恢复 =====
+	if state := redaction.GetStateFromContext(c); state != nil {
+		if redaction.Config().LogRawRequests {
+			logger.Infof(c.Request.Context(), "[RAW RESPONSE FROM UPSTREAM] %s", string(responseBody))
+		}
+		responseBody = redaction.UnmaskBytes(responseBody, state)
+		if redaction.Config().LogRawRequests {
+			logger.Infof(c.Request.Context(), "[RAW RESPONSE] %s", string(responseBody))
+		}
+	} else if redaction.Config().LogRawRequests {
+		logger.Infof(c.Request.Context(), "[RAW RESPONSE] %s", string(responseBody))
+	}
+	// ==========================================
+
 	err = json.Unmarshal(responseBody, &textResponse)
 	if err != nil {
 		return ErrorWrapper(err, "unmarshal_response_body_failed", http.StatusInternalServerError), nil

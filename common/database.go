@@ -1,7 +1,7 @@
 package common
 
 import (
-	"github.com/songquanpeng/one-api/common/env"
+	"github.com/sentinelproxy/sentinelproxy/common/env"
 )
 
 var UsingSQLite = false

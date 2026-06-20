@@ -1,7 +1,7 @@
 package monitor
 
 import (
-	"github.com/songquanpeng/one-api/common/config"
+	"github.com/sentinelproxy/sentinelproxy/common/config"
 )
 
 var store = make(map[int][]bool)

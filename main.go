@@ -11,16 +11,17 @@ import (
 	"github.com/gin-gonic/gin"
 	_ "github.com/joho/godotenv/autoload"
 
-	"github.com/songquanpeng/one-api/common"
-	"github.com/songquanpeng/one-api/common/client"
-	"github.com/songquanpeng/one-api/common/config"
-	"github.com/songquanpeng/one-api/common/i18n"
-	"github.com/songquanpeng/one-api/common/logger"
-	"github.com/songquanpeng/one-api/controller"
-	"github.com/songquanpeng/one-api/middleware"
-	"github.com/songquanpeng/one-api/model"
-	"github.com/songquanpeng/one-api/relay/adaptor/openai"
-	"github.com/songquanpeng/one-api/router"
+	"github.com/sentinelproxy/sentinelproxy/common"
+	"github.com/sentinelproxy/sentinelproxy/common/client"
+	"github.com/sentinelproxy/sentinelproxy/common/config"
+	"github.com/sentinelproxy/sentinelproxy/common/i18n"
+	"github.com/sentinelproxy/sentinelproxy/common/logger"
+	"github.com/sentinelproxy/sentinelproxy/controller"
+	"github.com/sentinelproxy/sentinelproxy/middleware"
+	"github.com/sentinelproxy/sentinelproxy/model"
+	"github.com/sentinelproxy/sentinelproxy/relay/adaptor/openai"
+	"github.com/sentinelproxy/sentinelproxy/relay/redaction"
+	"github.com/sentinelproxy/sentinelproxy/router"
 )
 
 //go:embed web/build/*
@@ -93,6 +94,28 @@ func main() {
 	}
 	openai.InitTokenEncoders()
 	client.Init()
+
+	// Initialize SentinelProxy redaction module
+	redactionConfigPath := os.Getenv("SENTINEL_REDACTION_CONFIG")
+	if redactionConfigPath == "" {
+		redactionConfigPath = "config/redaction.yaml"
+	}
+	if redactionCfg, err := redaction.LoadConfig(redactionConfigPath); err != nil {
+		logger.SysLogf("failed to load redaction config: %s", err.Error())
+	} else {
+		if err := redaction.Init(redactionCfg); err != nil {
+			logger.FatalLog("failed to initialize redaction module: " + err.Error())
+		}
+		redaction.InitSessionManager(redactionCfg)
+		defer func() {
+			if sm := redaction.GetSessionManager(); sm != nil {
+				_ = sm.SaveAll()
+			}
+		}()
+		if redactionCfg.Enabled {
+			logger.SysLog("SentinelProxy redaction module enabled")
+		}
+	}
 
 	// Initialize i18n
 	if err := i18n.Init(); err != nil {

@@ -8,22 +8,22 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/songquanpeng/one-api/common/helper"
-	"github.com/songquanpeng/one-api/relay/constant/role"
+	"github.com/sentinelproxy/sentinelproxy/common/helper"
+	"github.com/sentinelproxy/sentinelproxy/relay/constant/role"
 
 	"github.com/gin-gonic/gin"
 
-	"github.com/songquanpeng/one-api/common"
-	"github.com/songquanpeng/one-api/common/config"
-	"github.com/songquanpeng/one-api/common/logger"
-	"github.com/songquanpeng/one-api/model"
-	"github.com/songquanpeng/one-api/relay/adaptor/openai"
-	billingratio "github.com/songquanpeng/one-api/relay/billing/ratio"
-	"github.com/songquanpeng/one-api/relay/channeltype"
-	"github.com/songquanpeng/one-api/relay/controller/validator"
-	"github.com/songquanpeng/one-api/relay/meta"
-	relaymodel "github.com/songquanpeng/one-api/relay/model"
-	"github.com/songquanpeng/one-api/relay/relaymode"
+	"github.com/sentinelproxy/sentinelproxy/common"
+	"github.com/sentinelproxy/sentinelproxy/common/config"
+	"github.com/sentinelproxy/sentinelproxy/common/logger"
+	"github.com/sentinelproxy/sentinelproxy/model"
+	"github.com/sentinelproxy/sentinelproxy/relay/adaptor/openai"
+	billingratio "github.com/sentinelproxy/sentinelproxy/relay/billing/ratio"
+	"github.com/sentinelproxy/sentinelproxy/relay/channeltype"
+	"github.com/sentinelproxy/sentinelproxy/relay/controller/validator"
+	"github.com/sentinelproxy/sentinelproxy/relay/meta"
+	relaymodel "github.com/sentinelproxy/sentinelproxy/relay/model"
+	"github.com/sentinelproxy/sentinelproxy/relay/relaymode"
 )
 
 func getAndValidateTextRequest(c *gin.Context, relayMode int) (*relaymodel.GeneralOpenAIRequest, error) {

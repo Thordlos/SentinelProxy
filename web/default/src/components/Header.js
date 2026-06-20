@@ -35,20 +35,15 @@ let headerButtons = [
     icon: 'key',
   },
   {
-    name: 'header.redemption',
-    to: '/redemption',
-    icon: 'dollar sign',
-    admin: true,
-  },
-  {
-    name: 'header.topup',
-    to: '/topup',
-    icon: 'cart',
-  },
-  {
     name: 'header.user',
     to: '/user',
     icon: 'user',
+    admin: true,
+  },
+  {
+    name: 'header.masking',
+    to: '/masking',
+    icon: 'shield alternate',
     admin: true,
   },
   {

@@ -1,13 +1,16 @@
 package adaptor
 
 import (
+	"bytes"
 	"errors"
 	"fmt"
-	"github.com/gin-gonic/gin"
-	"github.com/songquanpeng/one-api/common/client"
-	"github.com/songquanpeng/one-api/relay/meta"
 	"io"
 	"net/http"
+	"strings"
+
+	"github.com/gin-gonic/gin"
+	"github.com/sentinelproxy/sentinelproxy/common/client"
+	"github.com/sentinelproxy/sentinelproxy/relay/meta"
 )
 
 func SetupCommonRequestHeader(c *gin.Context, req *http.Request, meta *meta.Meta) {
@@ -26,6 +29,15 @@ func DoRequestHelper(a Adaptor, c *gin.Context, meta *meta.Meta, requestBody io.
 	req, err := http.NewRequest(c.Request.Method, fullRequestURL, requestBody)
 	if err != nil {
 		return nil, fmt.Errorf("new request failed: %w", err)
+	}
+	// SentinelProxy: 对于已知长度的 body，显式设置 ContentLength，避免 chunked 传输
+	switch body := requestBody.(type) {
+	case *bytes.Buffer:
+		req.ContentLength = int64(body.Len())
+	case *bytes.Reader:
+		req.ContentLength = int64(body.Len())
+	case *strings.Reader:
+		req.ContentLength = int64(body.Len())
 	}
 	err = a.SetupRequestHeader(c, req, meta)
 	if err != nil {

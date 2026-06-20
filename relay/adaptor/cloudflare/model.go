@@ -1,6 +1,6 @@
 package cloudflare
 
-import "github.com/songquanpeng/one-api/relay/model"
+import "github.com/sentinelproxy/sentinelproxy/relay/model"
 
 type Request struct {
 	Messages    []model.Message `json:"messages,omitempty"`

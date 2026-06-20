@@ -8,11 +8,11 @@ import (
 	"strings"
 
 	"github.com/gin-gonic/gin"
-	"github.com/songquanpeng/one-api/relay/adaptor"
-	channelhelper "github.com/songquanpeng/one-api/relay/adaptor"
-	"github.com/songquanpeng/one-api/relay/meta"
-	"github.com/songquanpeng/one-api/relay/model"
-	relaymodel "github.com/songquanpeng/one-api/relay/model"
+	"github.com/sentinelproxy/sentinelproxy/relay/adaptor"
+	channelhelper "github.com/sentinelproxy/sentinelproxy/relay/adaptor"
+	"github.com/sentinelproxy/sentinelproxy/relay/meta"
+	"github.com/sentinelproxy/sentinelproxy/relay/model"
+	relaymodel "github.com/sentinelproxy/sentinelproxy/relay/model"
 )
 
 var _ adaptor.Adaptor = new(Adaptor)

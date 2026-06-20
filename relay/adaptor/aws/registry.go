@@ -1,9 +1,9 @@
 package aws
 
 import (
-	claude "github.com/songquanpeng/one-api/relay/adaptor/aws/claude"
-	llama3 "github.com/songquanpeng/one-api/relay/adaptor/aws/llama3"
-	"github.com/songquanpeng/one-api/relay/adaptor/aws/utils"
+	claude "github.com/sentinelproxy/sentinelproxy/relay/adaptor/aws/claude"
+	llama3 "github.com/sentinelproxy/sentinelproxy/relay/adaptor/aws/llama3"
+	"github.com/sentinelproxy/sentinelproxy/relay/adaptor/aws/utils"
 )
 
 type AwsModelType int

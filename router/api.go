@@ -1,9 +1,9 @@
 package router
 
 import (
-	"github.com/songquanpeng/one-api/controller"
-	"github.com/songquanpeng/one-api/controller/auth"
-	"github.com/songquanpeng/one-api/middleware"
+	"github.com/sentinelproxy/sentinelproxy/controller"
+	"github.com/sentinelproxy/sentinelproxy/controller/auth"
+	"github.com/sentinelproxy/sentinelproxy/middleware"
 
 	"github.com/gin-contrib/gzip"
 	"github.com/gin-gonic/gin"
@@ -68,6 +68,17 @@ func SetApiRouter(router *gin.Engine) {
 			optionRoute.GET("/", controller.GetOptions)
 			optionRoute.PUT("/", controller.UpdateOption)
 		}
+
+		// SentinelProxy: masking config routes
+		maskingRoute := apiRouter.Group("/masking")
+		maskingRoute.Use(middleware.RootAuth())
+		{
+			maskingRoute.GET("/config", controller.GetMaskingConfig)
+			maskingRoute.POST("/config", controller.SaveMaskingConfig)
+			maskingRoute.GET("/builtin", controller.GetMaskingBuiltinEntities)
+			maskingRoute.POST("/preview", controller.PreviewMasking)
+		}
+
 		channelRoute := apiRouter.Group("/channel")
 		channelRoute.Use(middleware.AdminAuth())
 		{
