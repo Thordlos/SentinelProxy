@@ -4,17 +4,46 @@ package redaction
 type OperatorType string
 
 const (
-	// OpReplace 替换为 ``代号``
-	OpReplace OperatorType = "replace"
-	// OpMask 部分掩码，如 138****8888
+	// OpSymbolize 符号化：生成 <SENTINEL> 代号（可恢复）
+	OpSymbolize OperatorType = "symbolize"
+	// OpMask 掩码化：部分掩码，如 138****8888（可恢复）
 	OpMask OperatorType = "mask"
-	// OpHash 哈希，不可逆
+	// OpHash 匿名化：哈希，不可逆
 	OpHash OperatorType = "hash"
-	// OpBlock 命中后阻断请求
+	// OpBlock 阻断：命中后阻断请求
 	OpBlock OperatorType = "block"
-	// OpIPRandom IP 格式保持随机化，私有IP→私有IP，公网IP→公网IP，可逆
+	// OpRandomize 匿名化：格式保持随机化，可逆
+	OpRandomize OperatorType = "randomize"
+
+	// OpReplace 是 symbolize 的向后兼容别名
+	OpReplace OperatorType = "replace"
+	// OpIPRandom 是 randomize 的向后兼容别名
 	OpIPRandom OperatorType = "ip_random"
 )
+
+// operatorAliases 将旧的操作符名称映射为规范名称
+var operatorAliases = map[OperatorType]OperatorType{
+	OpReplace:  OpSymbolize,
+	OpIPRandom: OpRandomize,
+}
+
+// NormalizeOperatorType 将旧操作符名称规范化为新名称
+func NormalizeOperatorType(op OperatorType) OperatorType {
+	if canonical, ok := operatorAliases[op]; ok {
+		return canonical
+	}
+	return op
+}
+
+// IsValidOperatorType 检查操作符类型是否有效（规范名或兼容别名）
+func IsValidOperatorType(op OperatorType) bool {
+	switch op {
+	case OpSymbolize, OpMask, OpHash, OpRandomize, OpBlock,
+		OpReplace, OpIPRandom:
+		return true
+	}
+	return false
+}
 
 // OperatorConfig 操作符配置
 type OperatorConfig struct {
@@ -64,6 +93,7 @@ type BuiltInEntityConfig struct {
 	Name     string         `yaml:"name,omitempty" json:"name,omitempty"`
 	Enabled  bool           `yaml:"enabled" json:"enabled"`
 	Operator OperatorConfig `yaml:"operator" json:"operator"`
+	Pattern  string         `yaml:"-" json:"pattern,omitempty"` // 仅 API 返回，不持久化
 }
 
 // RedactionConfig 脱敏总配置
@@ -98,15 +128,15 @@ func DefaultRedactionConfig() RedactionConfig {
 		CodeLength:     6,
 		LogRawRequests: false,
 		DefaultOperator: OperatorConfig{
-			Type: OpReplace,
+			Type: OpSymbolize,
 		},
 		BuiltInEntities: []BuiltInEntityConfig{
-			{Type: "ID_CARD", Name: "身份证", Enabled: true, Operator: OperatorConfig{Type: OpReplace}},
-			{Type: "PHONE_NUMBER", Name: "手机号", Enabled: true, Operator: OperatorConfig{Type: OpReplace}},
-			{Type: "EMAIL_ADDRESS", Name: "邮箱", Enabled: true, Operator: OperatorConfig{Type: OpReplace}},
-			{Type: "BANK_CARD", Name: "银行卡", Enabled: true, Operator: OperatorConfig{Type: OpReplace}},
-			{Type: "LICENSE_PLATE", Name: "车牌号", Enabled: false, Operator: OperatorConfig{Type: OpReplace}},
-			{Type: "IP_ADDRESS", Name: "IP地址", Enabled: false, Operator: OperatorConfig{Type: OpReplace}},
+			{Type: "ID_CARD", Name: "身份证", Enabled: true, Operator: OperatorConfig{Type: OpSymbolize}},
+			{Type: "PHONE_NUMBER", Name: "手机号", Enabled: true, Operator: OperatorConfig{Type: OpSymbolize}},
+			{Type: "EMAIL_ADDRESS", Name: "邮箱", Enabled: true, Operator: OperatorConfig{Type: OpSymbolize}},
+			{Type: "BANK_CARD", Name: "银行卡", Enabled: true, Operator: OperatorConfig{Type: OpSymbolize}},
+			{Type: "LICENSE_PLATE", Name: "车牌号", Enabled: false, Operator: OperatorConfig{Type: OpSymbolize}},
+			{Type: "IP_ADDRESS", Name: "IP地址", Enabled: false, Operator: OperatorConfig{Type: OpSymbolize}},
 		},
 	}
 }
@@ -147,19 +177,33 @@ func (cfg *RedactionConfig) SetBuiltInEntityNames() {
 // NormalizeConfig 规范化配置（向后兼容、填充默认值）
 func (cfg *RedactionConfig) NormalizeConfig() {
 	cfg.SetBuiltInEntityNames()
+
+	// 规范化默认操作符类型（兼容旧名称 replace/ip_random）
+	if cfg.DefaultOperator.Type == "" {
+		cfg.DefaultOperator.Type = OpSymbolize
+	} else {
+		cfg.DefaultOperator.Type = NormalizeOperatorType(cfg.DefaultOperator.Type)
+	}
+
 	for i := range cfg.BuiltInEntities {
 		if cfg.BuiltInEntities[i].Operator.Type == "" {
 			cfg.BuiltInEntities[i].Operator = cfg.DefaultOperator
+		} else {
+			cfg.BuiltInEntities[i].Operator.Type = NormalizeOperatorType(cfg.BuiltInEntities[i].Operator.Type)
 		}
 	}
 	for i := range cfg.StaticRules {
 		if cfg.StaticRules[i].Operator.Type == "" {
 			cfg.StaticRules[i].Operator = cfg.DefaultOperator
+		} else {
+			cfg.StaticRules[i].Operator.Type = NormalizeOperatorType(cfg.StaticRules[i].Operator.Type)
 		}
 	}
 	for i := range cfg.DynamicRules {
 		if cfg.DynamicRules[i].Operator.Type == "" {
 			cfg.DynamicRules[i].Operator = cfg.DefaultOperator
+		} else {
+			cfg.DynamicRules[i].Operator.Type = NormalizeOperatorType(cfg.DynamicRules[i].Operator.Type)
 		}
 	}
 }

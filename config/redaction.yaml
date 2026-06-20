@@ -9,38 +9,38 @@ code_prefix: ENT
 code_length: 6
 log_raw_requests: true
 default_operator:
-    type: replace
+    type: symbolize
 built_in_entities:
     - type: ID_CARD
       name: 中国大陆身份证
       enabled: true
       operator:
-        type: replace
+        type: symbolize
     - type: PHONE_NUMBER
       name: 中国大陆手机号
       enabled: true
       operator:
-        type: replace
+        type: symbolize
     - type: EMAIL_ADDRESS
       name: 电子邮箱
       enabled: true
       operator:
-        type: replace
+        type: symbolize
     - type: BANK_CARD
       name: 银行卡号
       enabled: true
       operator:
-        type: replace
+        type: symbolize
     - type: LICENSE_PLATE
       name: 中国车牌号
       enabled: true
       operator:
-        type: replace
+        type: symbolize
     - type: IP_ADDRESS
       name: IPv4 地址
       enabled: true
       operator:
-        type: ip_random
+        type: randomize
         ip_random_preserve_scope: true
         ip_random_cross_class: true
         ip_random_preserve_bits: 0

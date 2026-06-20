@@ -49,6 +49,32 @@ func TestBuiltInRules(t *testing.T) {
 	}
 }
 
+func TestBuiltInEntityConfigsIncludePattern(t *testing.T) {
+	configs := BuiltInEntityConfigs()
+	rules := BuiltInRules()
+
+	ruleMap := make(map[string]string)
+	for _, rule := range rules {
+		if _, ok := ruleMap[rule.EntityType]; !ok {
+			ruleMap[rule.EntityType] = rule.Pattern
+		}
+	}
+
+	for _, cfg := range configs {
+		expected, ok := ruleMap[cfg.Type]
+		if !ok {
+			t.Errorf("built-in entity %s has no corresponding rule", cfg.Type)
+			continue
+		}
+		if cfg.Pattern == "" {
+			t.Errorf("built-in entity %s should expose non-empty pattern", cfg.Type)
+		}
+		if cfg.Pattern != expected {
+			t.Errorf("pattern mismatch for %s: got %q, want %q", cfg.Type, cfg.Pattern, expected)
+		}
+	}
+}
+
 func TestMaskText(t *testing.T) {
 	cfg := newTestConfig()
 	if err := Init(cfg); err != nil {
@@ -622,3 +648,144 @@ func TestUnmaskBytes(t *testing.T) {
 		t.Errorf("expected restored content, got: %s", content)
 	}
 }
+
+func TestOperatorAliasNormalization(t *testing.T) {
+	tests := []struct {
+		input    OperatorType
+		expected OperatorType
+	}{
+		{"replace", OpSymbolize},
+		{"ip_random", OpRandomize},
+		{"symbolize", OpSymbolize},
+		{"randomize", OpRandomize},
+		{"mask", OpMask},
+		{"hash", OpHash},
+		{"block", OpBlock},
+		{"unknown", "unknown"},
+	}
+
+	for _, tt := range tests {
+		got := NormalizeOperatorType(tt.input)
+		if got != tt.expected {
+			t.Errorf("NormalizeOperatorType(%q) = %q, want %q", tt.input, got, tt.expected)
+		}
+	}
+}
+
+func TestConfigLoadWithLegacyOperators(t *testing.T) {
+	tmpDir := t.TempDir()
+	configPath := filepath.Join(tmpDir, "redaction.yaml")
+
+	legacyConfig := `enabled: true
+fail_closed: true
+score_threshold: 0
+max_text_length: 1048576
+cache_ttl_hours: 24
+state_dir: logs/masking
+code_style: typed
+code_prefix: ENT
+code_length: 6
+log_raw_requests: false
+default_operator:
+    type: replace
+built_in_entities:
+    - type: IP_ADDRESS
+      name: IPv4 地址
+      enabled: true
+      operator:
+        type: ip_random
+        ip_random_preserve_scope: true
+        ip_random_cross_class: true
+        ip_random_preserve_bits: 0
+static_rules: []
+dynamic_rules: []
+`
+	if err := os.WriteFile(configPath, []byte(legacyConfig), 0644); err != nil {
+		t.Fatalf("write legacy config failed: %v", err)
+	}
+
+	cfg, err := LoadConfig(configPath)
+	if err != nil {
+		t.Fatalf("LoadConfig failed: %v", err)
+	}
+
+	cfg.NormalizeConfig()
+
+	if cfg.DefaultOperator.Type != OpSymbolize {
+		t.Errorf("default_operator: expected %q, got %q", OpSymbolize, cfg.DefaultOperator.Type)
+	}
+
+	ipOperator := cfg.GetBuiltInEntityOperator("IP_ADDRESS")
+	if ipOperator.Type != OpRandomize {
+		t.Errorf("IP_ADDRESS operator: expected %q, got %q", OpRandomize, ipOperator.Type)
+	}
+
+	if err := Init(cfg); err != nil {
+		t.Fatalf("Init failed: %v", err)
+	}
+	state := NewMaskingState("test_legacy", cfg)
+	text := "源IP 207.154.238.21"
+	masked, err := MaskText(text, state)
+	if err != nil {
+		t.Fatalf("MaskText failed: %v", err)
+	}
+	if strings.Contains(masked, "207.154.238.21") {
+		t.Errorf("IP should be randomized, got: %s", masked)
+	}
+
+	restored := UnmaskText(masked, state)
+	if restored != text {
+		t.Errorf("round-trip failed: expected %q, got %q", text, restored)
+	}
+}
+
+func TestSymbolizeOperation(t *testing.T) {
+	cfg := newTestConfig()
+	cfg.DefaultOperator = OperatorConfig{Type: OpSymbolize}
+	if err := Init(cfg); err != nil {
+		t.Fatalf("Init failed: %v", err)
+	}
+
+	state := NewMaskingState("test_symbolize", cfg)
+	text := "我的邮箱是 alice@example.com"
+	masked, err := MaskText(text, state)
+	if err != nil {
+		t.Fatalf("MaskText failed: %v", err)
+	}
+
+	if !strings.Contains(masked, MarkerStart) {
+		t.Errorf("expected symbolize to produce marker, got: %s", masked)
+	}
+
+	restored := UnmaskText(masked, state)
+	if restored != text {
+		t.Errorf("round-trip failed: expected %q, got %q", text, restored)
+	}
+}
+
+func TestRandomizeOperation(t *testing.T) {
+	cfg := newTestConfig()
+	cfg.BuiltInEntities = []BuiltInEntityConfig{
+		{Type: "IP_ADDRESS", Name: "IPv4 地址", Enabled: true, Operator: OperatorConfig{Type: OpRandomize}},
+	}
+	if err := Init(cfg); err != nil {
+		t.Fatalf("Init failed: %v", err)
+	}
+
+	state := NewMaskingState("test_randomize", cfg)
+	text := "源IP 207.154.238.21"
+	masked, err := MaskText(text, state)
+	if err != nil {
+		t.Fatalf("MaskText failed: %v", err)
+	}
+
+	if strings.Contains(masked, "207.154.238.21") {
+		t.Errorf("IP should be randomized, got: %s", masked)
+	}
+
+	restored := UnmaskText(masked, state)
+	if restored != text {
+		t.Errorf("round-trip failed: expected %q, got %q", text, restored)
+	}
+}
+

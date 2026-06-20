@@ -17,12 +17,21 @@ import {
 import { API, showError, showSuccess } from '../helpers';
 
 const operatorOptions = [
-  { key: 'replace', text: '替换为代号（可恢复）', value: 'replace' },
-  { key: 'mask', text: '部分掩码（可恢复）', value: 'mask' },
-  { key: 'hash', text: '哈希（不可逆）', value: 'hash' },
-  { key: 'block', text: '阻断请求', value: 'block' },
-  { key: 'ip_random', text: 'IP格式保持随机化（格式保持，可恢复）', value: 'ip_random' },
+  { key: 'symbolize', text: '符号化 — 替换为代号', value: 'symbolize', description: '可恢复' },
+  { key: 'mask', text: '掩码化 — 部分掩码', value: 'mask', description: '可恢复' },
+  { key: 'hash', text: '匿名化 — 哈希', value: 'hash', description: '不可逆' },
+  { key: 'randomize', text: '匿名化 — 格式保持随机化', value: 'randomize', description: '不可逆' },
+  { key: 'block', text: '阻断 — 阻断请求', value: 'block', description: '阻断' },
 ];
+
+// 将旧操作符名称映射为新名称（向后兼容）
+const normalizeOperatorType = (type) => {
+  const aliasMap = {
+    replace: 'symbolize',
+    ip_random: 'randomize',
+  };
+  return aliasMap[type] || type || 'symbolize';
+};
 
 const codeStyleOptions = [
   { key: 'typed', text: '类型编号（如 PHONE_NUMBER_1）', value: 'typed' },
@@ -30,17 +39,19 @@ const codeStyleOptions = [
 ];
 
 const defaultOperatorConfig = (type) => {
-  switch (type) {
+  const normalized = normalizeOperatorType(type);
+  switch (normalized) {
     case 'mask':
       return { type: 'mask', mask_char: '*', chars_to_mask: 4, from_end: false };
     case 'hash':
       return { type: 'hash', hash_type: 'sha256' };
     case 'block':
       return { type: 'block' };
-    case 'ip_random':
-      return { type: 'ip_random', ip_random_preserve_scope: true, ip_random_cross_class: true, ip_random_preserve_bits: 0 };
+    case 'randomize':
+      return { type: 'randomize', ip_random_preserve_scope: true, ip_random_cross_class: true, ip_random_preserve_bits: 0 };
+    case 'symbolize':
     default:
-      return { type: 'replace' };
+      return { type: 'symbolize' };
   }
 };
 
@@ -59,7 +70,7 @@ const MaskingSetting = () => {
     code_prefix: 'ENT',
     code_length: 6,
     log_raw_requests: false,
-    default_operator: { type: 'replace' },
+    default_operator: { type: 'symbolize' },
     built_in_entities: [],
     static_rules: [],
     dynamic_rules: [],
@@ -194,6 +205,50 @@ const MaskingSetting = () => {
     setConfig((prev) => ({ ...prev, [key]: newRules }));
   };
 
+  const generateUniqueRuleId = (baseId) => {
+    const existingIds = new Set([
+      ...config.static_rules.map((r) => r.id),
+      ...config.dynamic_rules.map((r) => r.id),
+    ]);
+    let candidateId = baseId;
+    let suffix = 1;
+    while (existingIds.has(candidateId)) {
+      candidateId = `${baseId}_${suffix}`;
+      suffix++;
+    }
+    return candidateId;
+  };
+
+  const copyBuiltinToDynamic = (entity) => {
+    const builtin = builtinEntities.find((e) => e.type === entity.type);
+    const pattern = builtin?.pattern || '';
+
+    if (!pattern) {
+      showError(`内置规则 "${entity.name}" 暂无正则表达式，无法复制`);
+      return;
+    }
+
+    const baseId = entity.type.toLowerCase();
+    const newId = generateUniqueRuleId(baseId);
+
+    const newRule = {
+      id: newId,
+      name: `${entity.name}（自定义）`,
+      entity_type: entity.type,
+      pattern: pattern,
+      score: 1.0,
+      operator: { ...entity.operator },
+      description: `从内置规则 "${entity.name}" 复制`,
+    };
+
+    setConfig((prev) => ({
+      ...prev,
+      dynamic_rules: [...prev.dynamic_rules, newRule],
+    }));
+
+    showSuccess(`已复制 "${entity.name}" 到自定义正则规则，请点击保存生效`);
+  };
+
   const runPreview = async () => {
     if (!previewText) return;
     setPreviewLoading(true);
@@ -252,7 +307,7 @@ const MaskingSetting = () => {
             style={{ width: '120px' }}
           />
         );
-      case 'ip_random':
+      case 'randomize':
         return (
           <>
             <Form.Field
@@ -383,6 +438,7 @@ const MaskingSetting = () => {
                 <Table.HeaderCell>名称</Table.HeaderCell>
                 <Table.HeaderCell>操作符</Table.HeaderCell>
                 <Table.HeaderCell>操作符配置</Table.HeaderCell>
+                <Table.HeaderCell>操作</Table.HeaderCell>
               </Table.Row>
             </Table.Header>
             <Table.Body>
@@ -400,13 +456,25 @@ const MaskingSetting = () => {
                     <Dropdown
                       selection
                       options={operatorOptions}
-                      value={entity.operator?.type || 'replace'}
+                      value={normalizeOperatorType(entity.operator?.type)}
                       onChange={(e, { value }) => updateBuiltInOperator(idx, value)}
                       style={{ minWidth: '180px' }}
                     />
                   </Table.Cell>
                   <Table.Cell>
                     {renderOperatorConfig(entity.operator || { type: 'replace' }, (updated) => updateBuiltInOperatorConfig(idx, updated))}
+                  </Table.Cell>
+                  <Table.Cell>
+                    <Button
+                      icon
+                      basic
+                      color='blue'
+                      size='small'
+                      title='复制为自定义正则规则'
+                      onClick={() => copyBuiltinToDynamic(entity)}
+                    >
+                      <Icon name='copy' />
+                    </Button>
                   </Table.Cell>
                 </Table.Row>
               ))}
@@ -464,7 +532,7 @@ const MaskingSetting = () => {
                     <Dropdown
                       selection
                       options={operatorOptions}
-                      value={rule.operator?.type || 'replace'}
+                      value={normalizeOperatorType(rule.operator?.type)}
                       onChange={(e, { value }) => updateRuleOperator('static', idx, value)}
                       style={{ minWidth: '180px' }}
                     />
@@ -538,7 +606,7 @@ const MaskingSetting = () => {
                     <Dropdown
                       selection
                       options={operatorOptions}
-                      value={rule.operator?.type || 'replace'}
+                      value={normalizeOperatorType(rule.operator?.type)}
                       onChange={(e, { value }) => updateRuleOperator('dynamic', idx, value)}
                       style={{ minWidth: '180px' }}
                     />

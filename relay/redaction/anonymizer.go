@@ -58,7 +58,8 @@ func (a *Anonymizer) Anonymize(text string, entities []Entity, state *MaskingSta
 
 // applyOperator 根据操作符生成替换内容
 func (a *Anonymizer) applyOperator(original, code string, op OperatorConfig, state *MaskingState) string {
-	switch op.Type {
+	opType := NormalizeOperatorType(op.Type)
+	switch opType {
 	case OpMask:
 		masked := maskString(original, op.MaskChar, op.CharsToMask, op.FromEnd)
 		if state != nil {
@@ -68,14 +69,16 @@ func (a *Anonymizer) applyOperator(original, code string, op OperatorConfig, sta
 	case OpHash:
 		h := sha256.Sum256([]byte(original))
 		return fmt.Sprintf("%x", h[:8])
-	case OpIPRandom:
-		// IP 格式保持随机化：生成格式正确的假 IP
-		// 映射通过 state.SetForwardIP + SetMaskedMapping 存储
+	case OpRandomize:
+		// 格式保持随机化：生成格式正确的假值（当前主要用于 IP）
 		fakeIP := RandomizeIP(original, state, op)
 		return fakeIP
 	case OpBlock:
 		return code // block 在更高层处理
-	default: // OpReplace
+	case OpSymbolize:
+		return MarkerStart + code + MarkerEnd
+	default:
+		// 未知操作符默认按符号化处理
 		return MarkerStart + code + MarkerEnd
 	}
 }

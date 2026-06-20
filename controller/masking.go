@@ -103,6 +103,21 @@ func SaveMaskingConfig(c *gin.Context) {
 // GetMaskingBuiltinEntities 获取内置实体列表
 func GetMaskingBuiltinEntities(c *gin.Context) {
 	configs := redaction.BuiltInEntityConfigs()
+
+	// 填充每个内置实体的正则 pattern，便于前端复制为自定义规则
+	rules := redaction.BuiltInRules()
+	ruleMap := make(map[string]string)
+	for _, rule := range rules {
+		if _, ok := ruleMap[rule.EntityType]; !ok {
+			ruleMap[rule.EntityType] = rule.Pattern
+		}
+	}
+	for i := range configs {
+		if pattern, ok := ruleMap[configs[i].Type]; ok {
+			configs[i].Pattern = pattern
+		}
+	}
+
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
 		"data":    configs,
