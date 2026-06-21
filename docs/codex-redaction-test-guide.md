@@ -91,6 +91,26 @@ cd /home/meliodas/文档/proxy/testmask
 echo "请帮我生成一封给客户的确认邮件草稿，内容包括：告知客户他的账号已完成进门登记报备，请他在今天之内回复确认。客户的资料如下：姓名赵飞燕，注册手机13925671352，常用登录IP 112.128.10.120，联系邮箱feiyan@gmail.com。邮件语气要正式礼貌，落款用客服部。" | codex exec --skip-git-repo-check
 ```
 
+### 5.1 自动化测试脚本
+
+项目已提供端到端测试脚本 `scripts/codex_redaction_test.sh`，它通过 Codex CLI 自动发送带敏感信息的 prompt，并断言响应中不出现 `<SENTINEL>...</SENTINEL>` 内部标识、且包含原始敏感值。
+
+```bash
+cd /home/meliodas/文档/proxy/SentinelProxy
+./scripts/codex_redaction_test.sh
+```
+
+脚本默认使用以下环境：
+- Codex CLI：`$HOME/.npm-global/bin/codex`
+- SentinelProxy：`http://127.0.0.1:3000`
+- 工作目录：`/home/meliodas/文档/proxy/testmask`
+
+可通过环境变量覆盖：
+
+```bash
+CODEX_BIN=/path/to/codex SENTINEL_URL=http://localhost:3000 ./scripts/codex_redaction_test.sh
+```
+
 ### 6. 验证结果
 
 如果脱敏还原正常工作，响应中应显示原始敏感信息：

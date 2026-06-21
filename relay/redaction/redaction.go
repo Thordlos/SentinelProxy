@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/sentinelproxy/sentinelproxy/relay/model"
 )
@@ -326,7 +327,8 @@ func DrainUnmaskBuffer(buffer string, state *MaskingState) (string, string) {
 	return clean, held
 }
 
-// drainMaskedInverse 替换输出中的 MaskedInverse 值（如假 IP），并检查末尾是否有不完整的 IP 片断
+// drainMaskedInverse 替换输出中的 MaskedInverse 值（如假 IP、假邮箱、假车牌），
+// 并检查末尾是否有不完整的掩码值片断（跨 SSE chunk 截断）。
 // 返回：(可安全输出的文本, 需要保留在 buffer 中的后缀)
 func drainMaskedInverse(text string, state *MaskingState) (string, string) {
 	if state == nil || len(state.MaskedInverse) == 0 {
@@ -353,45 +355,59 @@ func drainMaskedInverse(text string, state *MaskingState) (string, string) {
 		}
 	}
 
-	// 2. 检查末尾是否有不完整的 IP 地址片断（以数字或点结尾）
-	// 只保留末尾连续的 [0-9.] 字符，避免普通文本被误保留
-	// 如果末尾连续 IP 字符长度 > 0 且 < maxMaskLen，则可能是被截断的假 IP
-	tailLen := 0
-	runes := []rune(result)
-	for i := len(runes) - 1; i >= 0; i-- {
-		if isIPChar(runes[i]) {
-			tailLen++
+	// 2. 检查末尾是否有不完整的掩码值前缀或未完成的多字节 UTF-8 字符，
+	//    如果是则 hold 回 buffer，等待后续 chunk 拼接完整后再替换。
+	b := []byte(result)
+
+	// 2.1 计算因末尾 UTF-8 字符不完整需要保留的字节数
+	incompleteByteLen := 0
+	for i := len(b) - 1; i >= 0; i-- {
+		// continuation byte: 10xxxxxx
+		if b[i] >= 0x80 && b[i] <= 0xBF {
+			incompleteByteLen++
+			continue
+		}
+		// 到达 lead byte，判断从该位置到末尾是否是一个完整有效的 UTF-8 字符
+		if utf8.ValidString(string(b[i:])) {
+			incompleteByteLen = 0
 		} else {
+			incompleteByteLen = len(b) - i
+		}
+		break
+	}
+
+	// 2.2 计算末尾最长、且是某个 MaskedInverse key 前缀的后缀（按 rune 边界）
+	validPart := result
+	if incompleteByteLen > 0 {
+		validPart = result[:len(result)-incompleteByteLen]
+	}
+	runes := []rune(validPart)
+	heldRunes := 0
+	for l := 1; l <= len(runes) && l < maxMaskLen; l++ {
+		suffix := string(runes[len(runes)-l:])
+		if len(suffix) >= maxMaskLen {
 			break
 		}
-	}
-
-	// 3. 检查末尾是否有 MaskedInverse 值的前缀（防止假 IP 被 SSE 分块截断）
-	if tailLen > 0 && tailLen < maxMaskLen {
-		byteLen := len(result)
-		runes := []rune(result)
-		tailByteStart := byteLen
-		for i := 0; i < tailLen; i++ {
-			r := runes[len(runes)-1-i]
-			tailByteStart -= len(string(r))
-		}
-		tail := result[tailByteStart:]
-
-		// 检查 tail 是否是某个 MaskedInverse key 的前缀
 		for _, masked := range maskedValues {
-			if strings.HasPrefix(masked, tail) {
-				return result[:tailByteStart], tail
+			if strings.HasPrefix(masked, suffix) {
+				heldRunes = l
+				break
 			}
 		}
-		// tail 不匹配任何假 IP 前缀，可以安全输出
 	}
 
-	return result, ""
-}
+	heldByteLen := incompleteByteLen
+	if heldRunes > 0 {
+		suffix := string(runes[len(runes)-heldRunes:])
+		if len(suffix) > heldByteLen {
+			heldByteLen = len(suffix)
+		}
+	}
 
-// isIPChar 判断字符是否为 IP 地址的组成部分
-func isIPChar(r rune) bool {
-	return (r >= '0' && r <= '9') || r == '.'
+	if heldByteLen > 0 {
+		return result[:len(result)-heldByteLen], result[len(result)-heldByteLen:]
+	}
+	return result, ""
 }
 
 // PreviewResult 预览结果
