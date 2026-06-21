@@ -15,27 +15,27 @@ built_in_entities:
       name: 中国大陆身份证
       enabled: true
       operator:
-        type: symbolize
+        type: randomize
     - type: PHONE_NUMBER
       name: 中国大陆手机号
       enabled: true
       operator:
-        type: symbolize
+        type: randomize
     - type: EMAIL_ADDRESS
       name: 电子邮箱
       enabled: true
       operator:
-        type: symbolize
+        type: randomize
     - type: BANK_CARD
       name: 银行卡号
       enabled: true
       operator:
-        type: symbolize
+        type: randomize
     - type: LICENSE_PLATE
       name: 中国车牌号
       enabled: true
       operator:
-        type: symbolize
+        type: randomize
     - type: IP_ADDRESS
       name: IPv4 地址
       enabled: true

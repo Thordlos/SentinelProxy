@@ -49,6 +49,8 @@ func Relay(c *gin.Context) {
 	if config.DebugEnabled || redaction.Config().LogRawRequests {
 		requestBody, _ := common.GetRequestBody(c)
 		if redaction.Config().LogRawRequests {
+			requestId := c.GetString(helper.RequestIdKey)
+			redaction.RecordRawRequest(requestId, requestBody)
 			logger.Infof(ctx, "[RAW REQUEST] %s", string(requestBody))
 		} else {
 			logger.Debugf(ctx, "request body: %s", string(requestBody))

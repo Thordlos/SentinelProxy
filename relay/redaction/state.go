@@ -69,6 +69,7 @@ type MaskingState struct {
 	Inverse       map[string]string `json:"inverse"`        // 代号 -> 原词
 	MaskedInverse map[string]string `json:"masked_inverse"` // 掩码值 -> 原词
 	ForwardIP     map[string]string `json:"forward_ip"`     // 原IP -> 假IP（IP 格式保持随机化）
+	TokenForward  map[string]string `json:"token_forward"`  // 原值 -> token（定长 token 化会话一致性）
 	Counters      map[string]int    `json:"counters"`       // 各类型计数器
 	UsedCodes     map[string]bool   `json:"used_codes"`     // 已使用代号
 	EntityTypes   map[string]string `json:"entity_types"`   // 代号 -> 实体类型
@@ -85,6 +86,7 @@ func NewMaskingState(sessionID string, config *RedactionConfig) *MaskingState {
 		Inverse:       make(map[string]string),
 		MaskedInverse: make(map[string]string),
 		ForwardIP:     make(map[string]string),
+		TokenForward:  make(map[string]string),
 		Counters:      make(map[string]int),
 		UsedCodes:     make(map[string]bool),
 		EntityTypes:   make(map[string]string),
@@ -115,6 +117,20 @@ func (s *MaskingState) GetOriginalByMasked(masked string) string {
 	return s.MaskedInverse[masked]
 }
 
+// GetMaskedMappingKey 通过原始值查找已存在的掩码值（用于格式保持随机化的会话一致性）
+func (s *MaskingState) GetMaskedMappingKey(original string) string {
+	if s == nil || original == "" {
+		return ""
+	}
+	s.LastAccessed = time.Now()
+	for masked, orig := range s.MaskedInverse {
+		if orig == original {
+			return masked
+		}
+	}
+	return ""
+}
+
 // SetForwardIP 保存原始 IP 到假 IP 的映射（IP 格式保持随机化）
 func (s *MaskingState) SetForwardIP(originalIP, fakeIP string) {
 	if s == nil || originalIP == "" || fakeIP == "" {
@@ -134,6 +150,27 @@ func (s *MaskingState) GetForwardIP(originalIP string) string {
 	}
 	s.LastAccessed = time.Now()
 	return s.ForwardIP[originalIP]
+}
+
+// SetTokenForward 保存原值到 token 的映射（定长 token 化会话一致性）
+func (s *MaskingState) SetTokenForward(original, token string) {
+	if s == nil || original == "" || token == "" {
+		return
+	}
+	if s.TokenForward == nil {
+		s.TokenForward = make(map[string]string)
+	}
+	s.TokenForward[original] = token
+	s.LastAccessed = time.Now()
+}
+
+// GetTokenForward 获取原值对应的 token（定长 token 化会话一致性）
+func (s *MaskingState) GetTokenForward(original string) string {
+	if s == nil {
+		return ""
+	}
+	s.LastAccessed = time.Now()
+	return s.TokenForward[original]
 }
 
 // GetCode 获取原词对应的代号，不存在则生成
@@ -202,6 +239,9 @@ func LoadMaskingState(sessionID string, config *RedactionConfig) (*MaskingState,
 	}
 	if state.ForwardIP == nil {
 		state.ForwardIP = make(map[string]string)
+	}
+	if state.TokenForward == nil {
+		state.TokenForward = make(map[string]string)
 	}
 	state.LastAccessed = time.Now()
 	return state, nil

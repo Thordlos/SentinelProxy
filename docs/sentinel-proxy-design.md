@@ -11,7 +11,7 @@
 
 用户已有一个原型项目 `codeproxy`，验证了以下核心思路：
 - 会话级脱敏状态（`MaskingState`）
-- ``代号`` 标记格式
+- `<SENTINEL>CODE</SENTINEL>` 标记格式
 - 流式响应实时还原
 - 静态关键词 + 动态正则规则
 
@@ -40,7 +40,7 @@ one-api 已经完整提供以上能力，且 DeepSeek、Kimi/Moonshot 等国产�
 | 基础框架 | one-api | 国产模型支持完整，有用户/计费/Web UI |
 | 项目名 | SentinelProxy | 体现"守护敏感数据不流出" |
 | 检测引擎 | 纯 Go 正则规则引擎 | 内网部署，无外部依赖 |
-| 占位符格式 | ``代号`` | 继承 codeproxy 验证成功的方案，流式恢复简单可靠 |
+| 占位符格式 | `<SENTINEL>CODE</SENTINEL>` | 继承 codeproxy 验证成功的方案，流式恢复简单可靠 |
 | 代号风格 | typed（类型编号） | `COMPANY_1`、`PHONE_2`，可读性强，便于调试 |
 | 状态粒度 | 会话级 `MaskingState` | 多轮对话中同一敏感词保持同一代号 |
 | 脱敏范围 | user 消息 + tool 参数 | assistant 历史消息不处理（模型看到的本就是脱敏态） |
@@ -92,7 +92,7 @@ Client Request
     │  1. 解析 session_id
     │  2. 加载/创建 MaskingState
     │  3. 对 user 消息和 tool 参数脱敏
-    │  4. 生成 ``代号`` 并更新双向映射
+    │  4. 生成 `<SENTINEL>CODE</SENTINEL>` 并更新双向映射
     │  5. 将 MaskingState 存入 gin.Context
     ▼
 [adaptor.ConvertRequest → DoRequest → 上游 LLM]
@@ -100,7 +100,7 @@ Client Request
     ▼
 [Handler]
     │  1. 读取完整响应 body
-    │  2. 用 MaskingState 反向替换 ``代号``
+    │  2. 用 MaskingState 反向替换 `<SENTINEL>CODE</SENTINEL>`
     │  3. 写回 client
     ▼
 Client Response (含原始值)
@@ -123,7 +123,7 @@ Client Request
     ▼
 [StreamingUnmasker]
     │  解析每个 chunk 的 delta.content
-    │  用 ``代号`` 映射实时恢复
+    │  用 `<SENTINEL>CODE</SENTINEL>` 映射实时恢复
     │  处理跨 chunk 截断
     ▼
 Client SSE Stream (含原始值)
@@ -151,31 +151,35 @@ relay/redaction/
 
 ### 4.1 占位符格式
 
-统一使用成对反引号作为标记：
+统一使用 XML 风格标记：
 
 ```
-``COMPANY_1``
-``PHONE_NUMBER_2``
-``EMAIL_ADDRESS_3``
+<SENTINEL>COMPANY_1</SENTINEL>
+<SENTINEL>PHONE_NUMBER_2</SENTINEL>
+<SENTINEL>EMAIL_ADDRESS_3</SENTINEL>
 ```
 
 **为什么选这种格式：**
-- 反引号在普通文本中相对少见
-- 成对标记便于流式状态机识别边界
-- 与 codeproxy 设计一致，便于经验迁移
-- 不需要 XML/HTML 风格标记的复杂转义处理
+- 标记边界清晰，包含开始/结束标签
+- 便于流式状态机识别不完整标签
+- 与内部状态表映射配合，还原可靠
+- 保留旧格式 ``CODE`` 兼容
 
 ### 4.2 会话状态 MaskingState
 
 ```go
 type MaskingState struct {
-    SessionID    string
-    Forward      map[string]string  // 原词 -> ``代号``
-    Inverse      map[string]string  // ``代号`` -> 原词
-    Counters     map[string]int     // 各类型代号计数器
-    UsedCodes    map[string]bool    // 已使用代号集合
-    CreatedAt    time.Time
-    LastAccessed time.Time
+    SessionID     string
+    Forward       map[string]string  // 原词 -> <SENTINEL>CODE</SENTINEL>
+    Inverse       map[string]string  // <SENTINEL>CODE</SENTINEL> -> 原词
+    MaskedInverse map[string]string  // 替换值 -> 原词
+    ForwardIP     map[string]string  // 原IP -> 假IP
+    TokenForward  map[string]string  // 原值 -> token
+    Counters      map[string]int
+    UsedCodes     map[string]bool
+    EntityTypes   map[string]string
+    CreatedAt     time.Time
+    LastAccessed  time.Time
 }
 ```
 
@@ -198,16 +202,19 @@ type MaskingState struct {
 
 规则优先级：请求级 > 自定义 > 内置。
 
+> 注：更详细的脱敏状态表、操作符实现与还原流程，见 [redaction-architecture.md](./redaction-architecture.md)。
+
 ### 4.4 脱敏操作符
 
-| 操作符 | 说明 | 是否可恢复 |
-|--------|------|-----------|
-| `replace` | 替换为 ``代号`` | ✅ |
-| `mask` | 部分掩码 | ❌ |
-| `hash` | 哈希 | ❌ |
+| 规范名 | 说明 | 恢复方式 |
+|--------|------|---------|
+| `symbolize`（原 `replace`） | 替换为 `<SENTINEL>CODE</SENTINEL>` | `Inverse[code] = original` |
+| `mask` | 部分掩码，如 `138****5678` | `MaskedInverse[masked] = original` |
+| `randomize`（原 `ip_random`） | 格式保持随机化：假 IP、假手机号、假身份证、假邮箱、假银行卡、假车牌等 | `MaskedInverse[fake] = original` |
+| `tokenize` | 定长随机 token | `MaskedInverse[token] = original` |
 | `block` | 命中后阻断请求 | - |
 
-默认使用 `replace`。
+所有脱敏算子均基于 `MaskingState` 映射表实现可还原。默认使用 `symbolize`；内置实体中 `PHONE_NUMBER`、`ID_CARD`、`IP_ADDRESS` 默认使用 `randomize`，以保留格式语义。
 
 ---
 
@@ -449,7 +456,7 @@ custom_rules:
 | 风险 | 影响 | 缓解 |
 |------|------|------|
 | 正则误报 | 非敏感内容被替换 | 提供白名单、置信度阈值、自定义规则 |
-| 占位符与真实文本冲突 | 用户输入恰好包含 ``代号`` | 按 MaskingState 映射优先恢复；无法识别的保持原样 |
+| 占位符与真实文本冲突 | 用户输入恰好包含 `<SENTINEL>CODE</SENTINEL>` | 按 MaskingState 映射优先恢复；无法识别的保持原样 |
 | 流式跨 chunk 异常 | 半个标记无法恢复 | StreamingUnmasker pending 缓冲 + flush 兜底 |
 | 大文本性能 | 长文本正则匹配慢 | `max_text_length` 限制、规则编译缓存 |
 | 非 OpenAI 适配器 | Ali/Baidu/Xunfei 流式格式不同 | 首期覆盖 openai.Adaptor（DeepSeek/Kimi），后续按需扩展 |
@@ -473,7 +480,7 @@ custom_rules:
 SentinelProxy 是在 one-api 基础上深度改造的企业内网 LLM 安全网关，核心差异是引入 `relay/redaction/` 脱敏模块：
 
 - **检测层**：纯 Go 正则规则引擎，内置中文 PII + 自定义规则
-- **脱敏层**：``代号`` 格式 + 会话级 MaskingState
+- **脱敏层**：`<SENTINEL>CODE</SENTINEL>` 格式 + 会话级 MaskingState
 - **恢复层**：非流式 JSON 替换 + 流式 SSE 实时恢复
 - **管理层**：继承 one-api 的用户/key/配额/计费/Web UI
 

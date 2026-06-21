@@ -123,6 +123,10 @@ func TestUnmaskText(t *testing.T) {
 
 func TestMaskTextWithPreserve(t *testing.T) {
 	cfg := newTestConfig()
+	cfg.DefaultOperator = OperatorConfig{Type: OpSymbolize}
+	for i := range cfg.BuiltInEntities {
+		cfg.BuiltInEntities[i].Operator = cfg.DefaultOperator
+	}
 	if err := Init(cfg); err != nil {
 		t.Fatalf("Init failed: %v", err)
 	}
@@ -247,8 +251,8 @@ func TestRedactRequest(t *testing.T) {
 	if userContent == "我的手机号是13812345678" {
 		t.Errorf("user message should be masked")
 	}
-	if !strings.Contains(userContent, "PHONE_NUMBER") {
-		t.Errorf("user message should contain placeholder: %s", userContent)
+	if strings.Contains(userContent, "13812345678") {
+		t.Errorf("user message should not contain original phone: %s", userContent)
 	}
 
 	// assistant 消息不应被处理
@@ -659,7 +663,7 @@ func TestOperatorAliasNormalization(t *testing.T) {
 		{"symbolize", OpSymbolize},
 		{"randomize", OpRandomize},
 		{"mask", OpMask},
-		{"hash", OpHash},
+		{"tokenize", OpTokenize},
 		{"block", OpBlock},
 		{"unknown", "unknown"},
 	}
@@ -669,6 +673,18 @@ func TestOperatorAliasNormalization(t *testing.T) {
 		if got != tt.expected {
 			t.Errorf("NormalizeOperatorType(%q) = %q, want %q", tt.input, got, tt.expected)
 		}
+	}
+
+	for _, tt := range tests {
+		if tt.input == "unknown" {
+			continue
+		}
+		if !IsValidOperatorType(tt.input) {
+			t.Errorf("IsValidOperatorType(%q) should be true", tt.input)
+		}
+	}
+	if IsValidOperatorType("unknown") {
+		t.Errorf("IsValidOperatorType(\"unknown\") should be false")
 	}
 }
 
@@ -742,6 +758,9 @@ dynamic_rules: []
 func TestSymbolizeOperation(t *testing.T) {
 	cfg := newTestConfig()
 	cfg.DefaultOperator = OperatorConfig{Type: OpSymbolize}
+	for i := range cfg.BuiltInEntities {
+		cfg.BuiltInEntities[i].Operator = cfg.DefaultOperator
+	}
 	if err := Init(cfg); err != nil {
 		t.Fatalf("Init failed: %v", err)
 	}
@@ -760,6 +779,382 @@ func TestSymbolizeOperation(t *testing.T) {
 	restored := UnmaskText(masked, state)
 	if restored != text {
 		t.Errorf("round-trip failed: expected %q, got %q", text, restored)
+	}
+}
+
+func TestTokenizeOperation(t *testing.T) {
+	cfg := newTestConfig()
+	cfg.DefaultOperator = OperatorConfig{Type: OpTokenize, TokenLength: 16}
+	for i := range cfg.BuiltInEntities {
+		cfg.BuiltInEntities[i].Operator = cfg.DefaultOperator
+	}
+	if err := Init(cfg); err != nil {
+		t.Fatalf("Init failed: %v", err)
+	}
+
+	state := NewMaskingState("test_tokenize", cfg)
+	text := "我的邮箱是 alice@example.com"
+	masked, err := MaskText(text, state)
+	if err != nil {
+		t.Fatalf("MaskText failed: %v", err)
+	}
+
+	if masked == text {
+		t.Errorf("expected masked text, got original: %s", masked)
+	}
+
+	// token 应该在 MaskedInverse 中
+	if len(state.MaskedInverse) == 0 {
+		t.Errorf("expected token mapping in MaskedInverse")
+	}
+
+	restored := UnmaskText(masked, state)
+	if restored != text {
+		t.Errorf("round-trip failed: expected %q, got %q", text, restored)
+	}
+}
+
+func TestTokenizeSessionConsistency(t *testing.T) {
+	cfg := newTestConfig()
+	cfg.DefaultOperator = OperatorConfig{Type: OpTokenize, TokenLength: 16}
+	for i := range cfg.BuiltInEntities {
+		cfg.BuiltInEntities[i].Operator = cfg.DefaultOperator
+	}
+	if err := Init(cfg); err != nil {
+		t.Fatalf("Init failed: %v", err)
+	}
+
+	state := NewMaskingState("test_tokenize_consistency", cfg)
+	masked1, err := MaskText("alice@example.com", state)
+	if err != nil {
+		t.Fatalf("MaskText failed: %v", err)
+	}
+	masked2, err := MaskText("再次联系 alice@example.com", state)
+	if err != nil {
+		t.Fatalf("MaskText failed: %v", err)
+	}
+
+	// 两次脱敏相同邮箱应得到相同 token
+	if !strings.HasSuffix(masked2, masked1) {
+		t.Errorf("same original should produce same token: masked1=%q, masked2=%q", masked1, masked2)
+	}
+
+	// 检查 TokenForward 只有一个映射
+	if len(state.TokenForward) != 1 {
+		t.Errorf("expected 1 token forward mapping, got %d", len(state.TokenForward))
+	}
+
+	restored1 := UnmaskText(masked1, state)
+	restored2 := UnmaskText(masked2, state)
+	if restored1 != "alice@example.com" {
+		t.Errorf("restore1 failed: %q", restored1)
+	}
+	if restored2 != "再次联系 alice@example.com" {
+		t.Errorf("restore2 failed: %q", restored2)
+	}
+}
+
+func TestRandomizePhone(t *testing.T) {
+	cfg := newTestConfig()
+	cfg.BuiltInEntities = []BuiltInEntityConfig{
+		{Type: "PHONE_NUMBER", Name: "手机号", Enabled: true, Operator: OperatorConfig{Type: OpRandomize}},
+	}
+	if err := Init(cfg); err != nil {
+		t.Fatalf("Init failed: %v", err)
+	}
+
+	state := NewMaskingState("test_phone_random", cfg)
+	text := "我的手机号是13812345678"
+	masked, err := MaskText(text, state)
+	if err != nil {
+		t.Fatalf("MaskText failed: %v", err)
+	}
+
+	if strings.Contains(masked, "13812345678") {
+		t.Errorf("phone should be randomized, got: %s", masked)
+	}
+	if strings.Contains(masked, "<SENTINEL>") {
+		t.Errorf("randomized phone should not contain SENTINEL marker, got: %s", masked)
+	}
+
+	phonePattern := `1[3-9]\d{9}`
+	re := regexp.MustCompile(phonePattern)
+	fakePhone := re.FindString(masked)
+	if fakePhone == "" {
+		t.Errorf("expected valid phone format in masked text, got: %s", masked)
+	}
+
+	restored := UnmaskText(masked, state)
+	if restored != text {
+		t.Errorf("round-trip failed: expected %q, got %q", text, restored)
+	}
+
+	t.Logf("masked: %s", masked)
+}
+
+func TestRandomizePhoneSessionConsistency(t *testing.T) {
+	cfg := newTestConfig()
+	cfg.BuiltInEntities = []BuiltInEntityConfig{
+		{Type: "PHONE_NUMBER", Name: "手机号", Enabled: true, Operator: OperatorConfig{Type: OpRandomize}},
+	}
+	if err := Init(cfg); err != nil {
+		t.Fatalf("Init failed: %v", err)
+	}
+
+	state := NewMaskingState("test_phone_session", cfg)
+	masked1, err := MaskText("手机号13812345678", state)
+	if err != nil {
+		t.Fatalf("MaskText failed: %v", err)
+	}
+	masked2, err := MaskText("再次联系13812345678", state)
+	if err != nil {
+		t.Fatalf("MaskText failed: %v", err)
+	}
+
+	phonePattern := `1[3-9]\d{9}`
+	re := regexp.MustCompile(phonePattern)
+	phone1 := re.FindString(masked1)
+	phone2 := re.FindString(masked2)
+	if phone1 == "" || phone2 == "" {
+		t.Fatalf("expected phones in both masked texts: %s / %s", masked1, masked2)
+	}
+	if phone1 != phone2 {
+		t.Errorf("same original phone should map to same fake phone: %s vs %s", phone1, phone2)
+	}
+}
+
+func TestRandomizeIDCard(t *testing.T) {
+	cfg := newTestConfig()
+	cfg.BuiltInEntities = []BuiltInEntityConfig{
+		{Type: "ID_CARD", Name: "身份证", Enabled: true, Operator: OperatorConfig{Type: OpRandomize}},
+	}
+	if err := Init(cfg); err != nil {
+		t.Fatalf("Init failed: %v", err)
+	}
+
+	state := NewMaskingState("test_idcard_random", cfg)
+	text := "身份证号是110101199001011234"
+	masked, err := MaskText(text, state)
+	if err != nil {
+		t.Fatalf("MaskText failed: %v", err)
+	}
+
+	if strings.Contains(masked, "110101199001011234") {
+		t.Errorf("ID card should be randomized, got: %s", masked)
+	}
+	if strings.Contains(masked, "<SENTINEL>") {
+		t.Errorf("randomized ID card should not contain SENTINEL marker, got: %s", masked)
+	}
+
+	idPattern := `\d{17}[\dXx]`
+	re := regexp.MustCompile(idPattern)
+	fakeID := re.FindString(masked)
+	if fakeID == "" {
+		t.Errorf("expected valid ID card format in masked text, got: %s", masked)
+	}
+
+	restored := UnmaskText(masked, state)
+	if restored != text {
+		t.Errorf("round-trip failed: expected %q, got %q", text, restored)
+	}
+
+	t.Logf("masked: %s", masked)
+}
+
+func TestRandomizeIDCardCheckCode(t *testing.T) {
+	cases := []string{
+		"110101199001011234",
+		"310115198805162345",
+	}
+	for _, c := range cases {
+		base := c[:17]
+		check := idCardCheckCode(base)
+		if len(check) != 1 {
+			t.Errorf("expected single check code for %s, got %q", c, check)
+		}
+	}
+}
+
+func TestRandomizeBankCard(t *testing.T) {
+	cfg := newTestConfig()
+	cfg.BuiltInEntities = []BuiltInEntityConfig{
+		{Type: "BANK_CARD", Name: "银行卡", Enabled: true, Operator: OperatorConfig{Type: OpRandomize}},
+	}
+	if err := Init(cfg); err != nil {
+		t.Fatalf("Init failed: %v", err)
+	}
+
+	state := NewMaskingState("test_bankcard_random", cfg)
+	text := "我的银行卡号 6222021234567890123"
+	masked, err := MaskText(text, state)
+	if err != nil {
+		t.Fatalf("MaskText failed: %v", err)
+	}
+
+	if strings.Contains(masked, "6222021234567890123") {
+		t.Errorf("bank card should be randomized, got: %s", masked)
+	}
+	if strings.Contains(masked, "<SENTINEL>") {
+		t.Errorf("randomized bank card should not contain SENTINEL marker, got: %s", masked)
+	}
+
+	// 验证生成的是 16-19 位数字
+	cardPattern := `\d{16,19}`
+	re := regexp.MustCompile(cardPattern)
+	fakeCard := re.FindString(masked)
+	if fakeCard == "" {
+		t.Errorf("expected valid bank card format in masked text, got: %s", masked)
+	}
+	if !luhnValid(fakeCard) {
+		t.Errorf("generated bank card should pass Luhn check: %s", fakeCard)
+	}
+
+	restored := UnmaskText(masked, state)
+	if restored != text {
+		t.Errorf("round-trip failed: expected %q, got %q", text, restored)
+	}
+
+	t.Logf("masked: %s", masked)
+}
+
+func luhnValid(s string) bool {
+	sum := 0
+	alternate := false
+	for i := len(s) - 1; i >= 0; i-- {
+		d := int(s[i] - '0')
+		if d < 0 || d > 9 {
+			return false
+		}
+		if alternate {
+			d *= 2
+			if d > 9 {
+				d -= 9
+			}
+		}
+		sum += d
+		alternate = !alternate
+	}
+	return sum%10 == 0
+}
+
+func TestRandomizeEmail(t *testing.T) {
+	cfg := newTestConfig()
+	cfg.BuiltInEntities = []BuiltInEntityConfig{
+		{Type: "EMAIL_ADDRESS", Name: "邮箱", Enabled: true, Operator: OperatorConfig{Type: OpRandomize}},
+	}
+	if err := Init(cfg); err != nil {
+		t.Fatalf("Init failed: %v", err)
+	}
+
+	state := NewMaskingState("test_email_random", cfg)
+	text := "我的邮箱是 alice@example.com"
+	masked, err := MaskText(text, state)
+	if err != nil {
+		t.Fatalf("MaskText failed: %v", err)
+	}
+
+	if strings.Contains(masked, "alice@example.com") {
+		t.Errorf("email should be randomized, got: %s", masked)
+	}
+	if strings.Contains(masked, "<SENTINEL>") {
+		t.Errorf("randomized email should not contain SENTINEL marker, got: %s", masked)
+	}
+
+	emailPattern := `[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}`
+	re := regexp.MustCompile(emailPattern)
+	fakeEmail := re.FindString(masked)
+	if fakeEmail == "" {
+		t.Errorf("expected valid email format in masked text, got: %s", masked)
+	}
+
+	restored := UnmaskText(masked, state)
+	if restored != text {
+		t.Errorf("round-trip failed: expected %q, got %q", text, restored)
+	}
+
+	t.Logf("masked: %s", masked)
+}
+
+func TestRandomizeLicensePlate(t *testing.T) {
+	cfg := newTestConfig()
+	cfg.BuiltInEntities = []BuiltInEntityConfig{
+		{Type: "LICENSE_PLATE", Name: "车牌号", Enabled: true, Operator: OperatorConfig{Type: OpRandomize}},
+	}
+	if err := Init(cfg); err != nil {
+		t.Fatalf("Init failed: %v", err)
+	}
+
+	state := NewMaskingState("test_plate_random", cfg)
+	text := "车牌号是京A12345"
+	masked, err := MaskText(text, state)
+	if err != nil {
+		t.Fatalf("MaskText failed: %v", err)
+	}
+
+	if strings.Contains(masked, "京A12345") {
+		t.Errorf("license plate should be randomized, got: %s", masked)
+	}
+	if strings.Contains(masked, "<SENTINEL>") {
+		t.Errorf("randomized license plate should not contain SENTINEL marker, got: %s", masked)
+	}
+
+	platePattern := `[京津沪渝冀豫云辽黑湘皖鲁新苏浙赣鄂桂甘晋蒙陕吉闽贵粤青藏川宁琼][A-Z][A-Z0-9]{4,6}`
+	re := regexp.MustCompile(platePattern)
+	fakePlate := re.FindString(masked)
+	if fakePlate == "" {
+		t.Errorf("expected valid license plate format in masked text, got: %s", masked)
+	}
+
+	restored := UnmaskText(masked, state)
+	if restored != text {
+		t.Errorf("round-trip failed: expected %q, got %q", text, restored)
+	}
+
+	t.Logf("masked: %s", masked)
+}
+
+func TestGreedyDigitLengthMatching(t *testing.T) {
+	cfg := newTestConfig()
+	for i := range cfg.BuiltInEntities {
+		cfg.BuiltInEntities[i].Enabled = true
+		cfg.BuiltInEntities[i].Operator = OperatorConfig{Type: OpRandomize}
+	}
+	if err := Init(cfg); err != nil {
+		t.Fatalf("Init failed: %v", err)
+	}
+
+	tests := []struct {
+		name        string
+		text        string
+		wantSameLen int
+	}{
+		{"18 位应优先识别为身份证并保持位数", "身份证号310115198805162345", 18},
+		{"16 位应识别为银行卡并保持位数", "银行卡6222021234567890", 16},
+		{"19 位应识别为银行卡并保持位数", "银行卡6222021234567890123", 19},
+		{"11 位应识别为手机号并保持位数", "手机号15987654321", 11},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			state := NewMaskingState("greedy_"+tt.name, cfg)
+			masked, err := MaskText(tt.text, state)
+			if err != nil {
+				t.Fatalf("MaskText failed: %v", err)
+			}
+
+			digitPattern := regexp.MustCompile(`\d+`)
+			fake := digitPattern.FindString(masked)
+			if len(fake) != tt.wantSameLen {
+				t.Errorf("expected masked digit length %d, got %d (%s)", tt.wantSameLen, len(fake), masked)
+			}
+
+			restored := UnmaskText(masked, state)
+			if restored != tt.text {
+				t.Errorf("round-trip failed: expected %q, got %q", tt.text, restored)
+			}
+
+			t.Logf("masked: %s", masked)
+		})
 	}
 }
 

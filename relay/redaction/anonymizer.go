@@ -1,8 +1,10 @@
 package redaction
 
 import (
+	"crypto/rand"
 	"crypto/sha256"
 	"fmt"
+	"math/big"
 	"strings"
 )
 
@@ -44,7 +46,7 @@ func (a *Anonymizer) Anonymize(text string, entities []Entity, state *MaskingSta
 			Type:     entity.Type,
 		})
 
-		replacement := a.applyOperator(entity.Text, code, entity.Operator, state)
+		replacement := a.applyOperator(entity.Text, code, entity.Type, entity.Operator, state)
 		text = text[:entity.Start] + replacement + text[entity.End:]
 	}
 
@@ -57,7 +59,7 @@ func (a *Anonymizer) Anonymize(text string, entities []Entity, state *MaskingSta
 }
 
 // applyOperator 根据操作符生成替换内容
-func (a *Anonymizer) applyOperator(original, code string, op OperatorConfig, state *MaskingState) string {
+func (a *Anonymizer) applyOperator(original, code, entityType string, op OperatorConfig, state *MaskingState) string {
 	opType := NormalizeOperatorType(op.Type)
 	switch opType {
 	case OpMask:
@@ -66,13 +68,13 @@ func (a *Anonymizer) applyOperator(original, code string, op OperatorConfig, sta
 			state.SetMaskedMapping(masked, original)
 		}
 		return masked
-	case OpHash:
-		h := sha256.Sum256([]byte(original))
-		return fmt.Sprintf("%x", h[:8])
 	case OpRandomize:
-		// 格式保持随机化：生成格式正确的假值（当前主要用于 IP）
-		fakeIP := RandomizeIP(original, state, op)
-		return fakeIP
+		// 格式保持随机化：根据实体类型生成格式正确的假值
+		fake := randomizeByType(original, entityType, state, op)
+		return fake
+	case OpTokenize:
+		token := generateToken(original, state, op)
+		return token
 	case OpBlock:
 		return code // block 在更高层处理
 	case OpSymbolize:
@@ -80,6 +82,105 @@ func (a *Anonymizer) applyOperator(original, code string, op OperatorConfig, sta
 	default:
 		// 未知操作符默认按符号化处理
 		return MarkerStart + code + MarkerEnd
+	}
+}
+
+// generateToken 生成定长可还原 token，并存入 MaskedInverse
+func generateToken(original string, state *MaskingState, op OperatorConfig) string {
+	if original == "" || state == nil {
+		return original
+	}
+
+	// 同一会话内，相同原始值返回相同 token
+	if existing := state.GetTokenForward(original); existing != "" {
+		return existing
+	}
+
+	length := op.TokenLength
+	if length <= 0 {
+		length = 16
+	}
+
+	charset := op.TokenChars
+	if charset == "" {
+		charset = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
+	}
+	runes := []rune(charset)
+
+	// 生成随机 token，避免与已有 masked 值冲突
+	charLen := big.NewInt(int64(len(runes)))
+	generateRandom := func() string {
+		var b strings.Builder
+		for i := 0; i < length; i++ {
+			n, err := rand.Int(rand.Reader, charLen)
+			if err != nil {
+				n = big.NewInt(int64(i % len(runes)))
+			}
+			b.WriteRune(runes[n.Int64()])
+		}
+		return b.String()
+	}
+
+	var token string
+	for attempts := 0; attempts < 100; attempts++ {
+		candidate := generateRandom()
+		if state.GetOriginalByMasked(candidate) == "" {
+			token = candidate
+			break
+		}
+	}
+
+	if token == "" {
+		// 极端情况：使用 SHA-256 派生确定性 token，并确保不冲突
+		h := sha256.Sum256([]byte(original))
+		hex := fmt.Sprintf("%x", h)
+		base := []rune(hex)[:min(length, len(hex))]
+		token = string(base)
+		for attempts := 0; state.GetOriginalByMasked(token) != "" && attempts < 1000; attempts++ {
+			suffix := fmt.Sprintf("%d", attempts)
+			runeSuffix := []rune(suffix)
+			if len(runeSuffix) >= length {
+				token = string(runeSuffix[:length])
+			} else {
+				token = string(base[:length-len(runeSuffix)]) + suffix
+			}
+		}
+	}
+
+	state.SetTokenForward(original, token)
+	state.SetMaskedMapping(token, original)
+	return token
+}
+
+func min(a, b int) int {
+	if a < b {
+		return a
+	}
+	return b
+}
+
+// randomizeByType 根据实体类型选择格式保持随机化策略
+func randomizeByType(original, entityType string, state *MaskingState, op OperatorConfig) string {
+	switch entityType {
+	case "IP_ADDRESS":
+		return RandomizeIP(original, state, op)
+	case "PHONE_NUMBER":
+		return RandomizePhone(original, state)
+	case "ID_CARD":
+		return RandomizeIDCard(original, state)
+	case "EMAIL_ADDRESS":
+		return RandomizeEmail(original, state)
+	case "BANK_CARD":
+		return RandomizeBankCard(original, state)
+	case "LICENSE_PLATE":
+		return RandomizeLicensePlate(original, state)
+	default:
+		// 对其他类型，先做通用掩码，再尝试还原；后续可扩展更多格式
+		masked := maskString(original, op.MaskChar, op.CharsToMask, op.FromEnd)
+		if state != nil {
+			state.SetMaskedMapping(masked, original)
+		}
+		return masked
 	}
 }
 

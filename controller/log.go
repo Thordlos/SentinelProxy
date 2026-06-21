@@ -5,6 +5,7 @@ import (
 	"github.com/sentinelproxy/sentinelproxy/common/config"
 	"github.com/sentinelproxy/sentinelproxy/common/ctxkey"
 	"github.com/sentinelproxy/sentinelproxy/model"
+	"github.com/sentinelproxy/sentinelproxy/relay/redaction"
 	"net/http"
 	"strconv"
 )
@@ -166,4 +167,52 @@ func DeleteHistoryLogs(c *gin.Context) {
 		"data":    count,
 	})
 	return
+}
+
+func GetLogRaw(c *gin.Context) {
+	id, err := strconv.Atoi(c.Param("id"))
+	if err != nil || id <= 0 {
+		c.JSON(http.StatusOK, gin.H{
+			"success": false,
+			"message": "invalid log id",
+		})
+		return
+	}
+
+	// 查询日志记录
+	log, err := model.GetLogById(id)
+	if err != nil {
+		c.JSON(http.StatusOK, gin.H{
+			"success": false,
+			"message": "log not found",
+		})
+		return
+	}
+
+	// 权限检查：管理员/Root 或日志所有者
+	role := c.GetInt(ctxkey.Role)
+	userId := c.GetInt(ctxkey.Id)
+	if role < model.RoleAdminUser && log.UserId != userId {
+		c.JSON(http.StatusOK, gin.H{
+			"success": false,
+			"message": "permission denied",
+		})
+		return
+	}
+
+	// 读取原始请求/响应记录
+	entry, err := redaction.GetRawLogEntry(log.RequestId)
+	if err != nil {
+		c.JSON(http.StatusOK, gin.H{
+			"success": false,
+			"message": "raw log not found: " + err.Error(),
+		})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"message": "",
+		"data":    entry,
+	})
 }

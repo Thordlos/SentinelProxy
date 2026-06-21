@@ -122,40 +122,53 @@ func (e *RuleEngine) Analyze(text string, entities []string) ([]Entity, error) {
 			return nil, err
 		}
 
-		matches := re.FindAllStringIndex(text, -1)
+		matches := re.FindAllStringSubmatchIndex(text, -1)
 		for _, m := range matches {
-			pos := [2]int{m[0], m[1]}
+			// 选择捕获组或完整匹配
+			start, end := m[0], m[1]
+			if rule.CaptureGroup > 0 {
+				idx := rule.CaptureGroup * 2
+				if idx < len(m) && m[idx] >= 0 {
+					start, end = m[idx], m[idx+1]
+				}
+			}
+			pos := [2]int{start, end}
 			if seen[pos] {
 				continue
 			}
 			seen[pos] = true
 
 			results = append(results, Entity{
-				Type:     rule.EntityType,
-				Start:    m[0],
-				End:      m[1],
-				Text:     text[m[0]:m[1]],
-				Score:    rule.Score,
-				RuleID:   rule.ID,
-				Operator: rule.Operator,
+				Type:           rule.EntityType,
+				Start:          start,
+				End:            end,
+				Text:           text[start:end],
+				Score:          rule.Score,
+				RuleID:         rule.ID,
+				Operator:       rule.Operator,
+				DigitPrecision: rule.DigitPrecision(end - start),
 			})
 		}
 	}
 
-	// 按起始位置排序，相同起始位置按长度降序
+	// 按起始位置排序，相同起始位置按长度降序，长度相同按数字位数精确度降序
 	sort.Slice(results, func(i, j int) bool {
-		if results[i].Start == results[j].Start {
-			return results[i].End > results[j].End
+		if results[i].Start != results[j].Start {
+			return results[i].Start < results[j].Start
 		}
-		return results[i].Start < results[j].Start
+		lenI, lenJ := results[i].End-results[i].Start, results[j].End-results[j].Start
+		if lenI != lenJ {
+			return lenI > lenJ
+		}
+		return results[i].DigitPrecision > results[j].DigitPrecision
 	})
 
-	// 处理重叠：保留最长匹配
+	// 处理重叠：保留最长匹配；长度相同时保留数字位数精确度更高的
 	results = mergeOverlapping(results)
 	return results, nil
 }
 
-// mergeOverlapping 处理重叠实体，保留最长匹配
+// mergeOverlapping 处理重叠实体，保留最长匹配；长度相同时保留数字位数精确度更高的
 func mergeOverlapping(entities []Entity) []Entity {
 	if len(entities) == 0 {
 		return entities
@@ -165,9 +178,13 @@ func mergeOverlapping(entities []Entity) []Entity {
 	current := entities[0]
 	for i := 1; i < len(entities); i++ {
 		next := entities[i]
-		// 如果 next 与 current 重叠，选择更长的
+		// 如果 next 与 current 重叠，选择更长的；长度相同则选数字位数精确度更高的
 		if next.Start < current.End {
-			if next.End-next.Start > current.End-current.Start {
+			nextLen := next.End - next.Start
+			currLen := current.End - current.Start
+			if nextLen > currLen {
+				current = next
+			} else if nextLen == currLen && next.DigitPrecision > current.DigitPrecision {
 				current = next
 			}
 		} else {

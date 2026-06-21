@@ -208,6 +208,15 @@ func SumUsedToken(logType int, startTimestamp int64, endTimestamp int64, modelNa
 	return token
 }
 
+func GetLogById(id int) (*Log, error) {
+	var log Log
+	err := LOG_DB.Where("id = ?", id).First(&log).Error
+	if err != nil {
+		return nil, err
+	}
+	return &log, nil
+}
+
 func DeleteOldLog(targetTimestamp int64) (int64, error) {
 	result := LOG_DB.Where("created_at < ?", targetTimestamp).Delete(&Log{})
 	return result.RowsAffected, result.Error

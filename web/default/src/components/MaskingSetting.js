@@ -17,10 +17,10 @@ import {
 import { API, showError, showSuccess } from '../helpers';
 
 const operatorOptions = [
-  { key: 'symbolize', text: '符号化 — 替换为代号', value: 'symbolize', description: '可恢复' },
-  { key: 'mask', text: '掩码化 — 部分掩码', value: 'mask', description: '可恢复' },
-  { key: 'hash', text: '匿名化 — 哈希', value: 'hash', description: '不可逆' },
-  { key: 'randomize', text: '匿名化 — 格式保持随机化', value: 'randomize', description: '不可逆' },
+  { key: 'symbolize', text: '可恢复 — 符号化（替换为代号）', value: 'symbolize', description: '可恢复' },
+  { key: 'mask', text: '可恢复 — 掩码化（部分掩码）', value: 'mask', description: '可恢复' },
+  { key: 'randomize', text: '可恢复 — 格式保持随机化', value: 'randomize', description: '可恢复' },
+  { key: 'tokenize', text: '可恢复 — 定长 Token 化', value: 'tokenize', description: '可恢复' },
   { key: 'block', text: '阻断 — 阻断请求', value: 'block', description: '阻断' },
 ];
 
@@ -43,12 +43,12 @@ const defaultOperatorConfig = (type) => {
   switch (normalized) {
     case 'mask':
       return { type: 'mask', mask_char: '*', chars_to_mask: 4, from_end: false };
-    case 'hash':
-      return { type: 'hash', hash_type: 'sha256' };
     case 'block':
       return { type: 'block' };
     case 'randomize':
       return { type: 'randomize', ip_random_preserve_scope: true, ip_random_cross_class: true, ip_random_preserve_bits: 0 };
+    case 'tokenize':
+      return { type: 'tokenize', token_length: 16, token_chars: 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789' };
     case 'symbolize':
     default:
       return { type: 'symbolize' };
@@ -167,7 +167,7 @@ const MaskingSetting = () => {
       id: '',
       name: '',
       entity_type: '',
-      operator: { type: 'replace' },
+      operator: { type: 'symbolize' },
       score: 1.0,
     };
     if (type === 'static') {
@@ -297,16 +297,6 @@ const MaskingSetting = () => {
             />
           </>
         );
-      case 'hash':
-        return (
-          <Form.Field
-            control={Input}
-            label='哈希算法'
-            value={operator.hash_type || 'sha256'}
-            onChange={(e) => onChange({ ...operator, hash_type: e.target.value })}
-            style={{ width: '120px' }}
-          />
-        );
       case 'randomize':
         return (
           <>
@@ -331,6 +321,28 @@ const MaskingSetting = () => {
               value={operator.ip_random_preserve_bits || 0}
               onChange={(e) => onChange({ ...operator, ip_random_preserve_bits: parseInt(e.target.value) || 0 })}
               style={{ width: '120px' }}
+            />
+          </>
+        );
+      case 'tokenize':
+        return (
+          <>
+            <Form.Field
+              control={Input}
+              label='Token 长度'
+              type='number'
+              min={4}
+              max={64}
+              value={operator.token_length || 16}
+              onChange={(e) => onChange({ ...operator, token_length: parseInt(e.target.value) || 16 })}
+              style={{ width: '120px' }}
+            />
+            <Form.Field
+              control={Input}
+              label='Token 字符集'
+              value={operator.token_chars || 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789'}
+              onChange={(e) => onChange({ ...operator, token_chars: e.target.value })}
+              style={{ minWidth: '300px' }}
             />
           </>
         );
@@ -462,7 +474,7 @@ const MaskingSetting = () => {
                     />
                   </Table.Cell>
                   <Table.Cell>
-                    {renderOperatorConfig(entity.operator || { type: 'replace' }, (updated) => updateBuiltInOperatorConfig(idx, updated))}
+                    {renderOperatorConfig(entity.operator || { type: 'symbolize' }, (updated) => updateBuiltInOperatorConfig(idx, updated))}
                   </Table.Cell>
                   <Table.Cell>
                     <Button

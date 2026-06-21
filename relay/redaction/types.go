@@ -8,12 +8,12 @@ const (
 	OpSymbolize OperatorType = "symbolize"
 	// OpMask 掩码化：部分掩码，如 138****8888（可恢复）
 	OpMask OperatorType = "mask"
-	// OpHash 匿名化：哈希，不可逆
-	OpHash OperatorType = "hash"
+	// OpRandomize 格式保持随机化：生成格式正确的假值（可恢复）
+	OpRandomize OperatorType = "randomize"
+	// OpTokenize 定长 token 化：生成固定长度随机 token（可恢复）
+	OpTokenize OperatorType = "tokenize"
 	// OpBlock 阻断：命中后阻断请求
 	OpBlock OperatorType = "block"
-	// OpRandomize 匿名化：格式保持随机化，可逆
-	OpRandomize OperatorType = "randomize"
 
 	// OpReplace 是 symbolize 的向后兼容别名
 	OpReplace OperatorType = "replace"
@@ -38,7 +38,7 @@ func NormalizeOperatorType(op OperatorType) OperatorType {
 // IsValidOperatorType 检查操作符类型是否有效（规范名或兼容别名）
 func IsValidOperatorType(op OperatorType) bool {
 	switch op {
-	case OpSymbolize, OpMask, OpHash, OpRandomize, OpBlock,
+	case OpSymbolize, OpMask, OpRandomize, OpTokenize, OpBlock,
 		OpReplace, OpIPRandom:
 		return true
 	}
@@ -52,7 +52,9 @@ type OperatorConfig struct {
 	MaskChar    string       `yaml:"mask_char,omitempty" json:"mask_char,omitempty"`
 	CharsToMask int          `yaml:"chars_to_mask,omitempty" json:"chars_to_mask,omitempty"`
 	FromEnd     bool         `yaml:"from_end,omitempty" json:"from_end,omitempty"`
-	HashType    string       `yaml:"hash_type,omitempty" json:"hash_type,omitempty"`
+	// Token 化专用配置
+	TokenLength int    `yaml:"token_length,omitempty" json:"token_length,omitempty"` // token 长度（默认 16）
+	TokenChars  string `yaml:"token_chars,omitempty" json:"token_chars,omitempty"`   // token 字符集（默认 alphanum）
 	// IP 格式保持随机化专用配置
 	IPRandomPreserveScope bool `yaml:"ip_random_preserve_scope,omitempty" json:"ip_random_preserve_scope,omitempty"` // 保持公私域划分（默认 true）
 	IPRandomCrossClass    bool `yaml:"ip_random_cross_class,omitempty" json:"ip_random_cross_class,omitempty"`       // 允许私有地址跨 A/B/C 类（默认 true）
@@ -61,14 +63,35 @@ type OperatorConfig struct {
 
 // Rule 自定义规则
 type Rule struct {
-	ID          string         `yaml:"id" json:"id"`
-	Name        string         `yaml:"name" json:"name"`
-	EntityType  string         `yaml:"entity_type" json:"entity_type"`
-	Keyword     string         `yaml:"keyword,omitempty" json:"keyword,omitempty"`
-	Pattern     string         `yaml:"pattern,omitempty" json:"pattern,omitempty"`
-	Score       float64        `yaml:"score" json:"score"`
-	Operator    OperatorConfig `yaml:"operator" json:"operator"`
-	Description string         `yaml:"description,omitempty" json:"description,omitempty"`
+	ID           string         `yaml:"id" json:"id"`
+	Name         string         `yaml:"name" json:"name"`
+	EntityType   string         `yaml:"entity_type" json:"entity_type"`
+	Keyword      string         `yaml:"keyword,omitempty" json:"keyword,omitempty"`
+	Pattern      string         `yaml:"pattern,omitempty" json:"pattern,omitempty"`
+	Score        float64        `yaml:"score" json:"score"`
+	Operator     OperatorConfig `yaml:"operator" json:"operator"`
+	Description  string         `yaml:"description,omitempty" json:"description,omitempty"`
+	CaptureGroup int            `yaml:"capture_group,omitempty" json:"capture_group,omitempty"` // 使用正则子组提取实体（默认 0 为整个匹配）
+	DigitLengths []int          `yaml:"digit_lengths,omitempty" json:"digit_lengths,omitempty"` // 数字实体期望长度列表，用于贪婪位数匹配
+}
+
+// DigitPrecision 计算当前匹配文本相对于规则期望长度的位数精确度
+// 范围越窄精确度越高，18 位身份证 [18] 会比 16-19 位银行卡更优先
+func (r Rule) DigitPrecision(textLen int) float64 {
+	if len(r.DigitLengths) == 0 {
+		return 0
+	}
+	for _, l := range r.DigitLengths {
+		if l == textLen {
+			return 1.0 / float64(len(r.DigitLengths))
+		}
+	}
+	return 0
+}
+
+// IsDigitEntity 判断该规则是否为纯数字类型实体（参与贪婪位数匹配）
+func (r Rule) IsDigitEntity() bool {
+	return len(r.DigitLengths) > 0
 }
 
 // CompiledRule 编译后的规则
@@ -78,13 +101,14 @@ type CompiledRule struct {
 
 // Entity 表示检测到的敏感实体
 type Entity struct {
-	Type     string  // 实体类型，如 EMAIL_ADDRESS
-	Start    int     // 在原始文本中的起始位置
-	End      int     // 在原始文本中的结束位置
-	Text     string  // 原始值
-	Score    float64 // 置信度
-	RuleID   string  // 命中的规则 ID
-	Operator OperatorConfig
+	Type           string  // 实体类型，如 EMAIL_ADDRESS
+	Start          int     // 在原始文本中的起始位置
+	End            int     // 在原始文本中的结束位置
+	Text           string  // 原始值
+	Score          float64 // 置信度
+	RuleID         string  // 命中的规则 ID
+	Operator       OperatorConfig
+	DigitPrecision float64 // 数字位数精确度（用于贪婪位数匹配）
 }
 
 // BuiltInEntityConfig 内置实体配置
@@ -131,12 +155,12 @@ func DefaultRedactionConfig() RedactionConfig {
 			Type: OpSymbolize,
 		},
 		BuiltInEntities: []BuiltInEntityConfig{
-			{Type: "ID_CARD", Name: "身份证", Enabled: true, Operator: OperatorConfig{Type: OpSymbolize}},
-			{Type: "PHONE_NUMBER", Name: "手机号", Enabled: true, Operator: OperatorConfig{Type: OpSymbolize}},
-			{Type: "EMAIL_ADDRESS", Name: "邮箱", Enabled: true, Operator: OperatorConfig{Type: OpSymbolize}},
-			{Type: "BANK_CARD", Name: "银行卡", Enabled: true, Operator: OperatorConfig{Type: OpSymbolize}},
-			{Type: "LICENSE_PLATE", Name: "车牌号", Enabled: false, Operator: OperatorConfig{Type: OpSymbolize}},
-			{Type: "IP_ADDRESS", Name: "IP地址", Enabled: false, Operator: OperatorConfig{Type: OpSymbolize}},
+			{Type: "ID_CARD", Name: "身份证", Enabled: true, Operator: OperatorConfig{Type: OpRandomize}},
+			{Type: "PHONE_NUMBER", Name: "手机号", Enabled: true, Operator: OperatorConfig{Type: OpRandomize}},
+			{Type: "EMAIL_ADDRESS", Name: "邮箱", Enabled: true, Operator: OperatorConfig{Type: OpRandomize}},
+			{Type: "BANK_CARD", Name: "银行卡", Enabled: true, Operator: OperatorConfig{Type: OpRandomize}},
+			{Type: "LICENSE_PLATE", Name: "车牌号", Enabled: false, Operator: OperatorConfig{Type: OpRandomize}},
+			{Type: "IP_ADDRESS", Name: "IP地址", Enabled: false, Operator: OperatorConfig{Type: OpRandomize}},
 		},
 	}
 }

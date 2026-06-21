@@ -11,6 +11,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/sentinelproxy/sentinelproxy/common"
 	"github.com/sentinelproxy/sentinelproxy/common/conv"
+	"github.com/sentinelproxy/sentinelproxy/common/helper"
 	"github.com/sentinelproxy/sentinelproxy/common/logger"
 	"github.com/sentinelproxy/sentinelproxy/common/render"
 	"github.com/sentinelproxy/sentinelproxy/relay/model"
@@ -72,11 +73,13 @@ func StreamHandler(c *gin.Context, resp *http.Response, relayMode int) (*model.E
 			for i := range streamResponse.Choices {
 				content := conv.AsString(streamResponse.Choices[i].Delta.Content)
 				if content != "" {
-					responseText += content
 					if unmasker != nil {
 						recovered := unmasker.Write(content)
+						responseText += recovered
 						streamResponse.Choices[i].Delta.Content = recovered
 						modified = true
+					} else {
+						responseText += content
 					}
 				}
 
@@ -84,11 +87,13 @@ func StreamHandler(c *gin.Context, resp *http.Response, relayMode int) (*model.E
 				for j := range streamResponse.Choices[i].Delta.ToolCalls {
 					args := conv.AsString(streamResponse.Choices[i].Delta.ToolCalls[j].Function.Arguments)
 					if args != "" {
-						responseText += args
 						if unmasker != nil {
 							recovered := unmasker.Write(args)
+							responseText += recovered
 							streamResponse.Choices[i].Delta.ToolCalls[j].Function.Arguments = recovered
 							modified = true
+						} else {
+							responseText += args
 						}
 					}
 				}
@@ -127,6 +132,7 @@ func StreamHandler(c *gin.Context, resp *http.Response, relayMode int) (*model.E
 	if unmasker != nil {
 		remaining := unmasker.Flush()
 		if remaining != "" {
+			responseText += remaining
 			finalChunk := buildFinalStreamChunk(remaining)
 			if finalChunk != "" {
 				render.StringData(c, dataPrefix+finalChunk)
@@ -145,6 +151,8 @@ func StreamHandler(c *gin.Context, resp *http.Response, relayMode int) (*model.E
 	}
 
 	if redaction.Config().LogRawRequests {
+		requestId := helper.GetRequestID(c.Request.Context())
+		redaction.RecordRawStreamText(requestId, responseText)
 		logger.Infof(c.Request.Context(), "[RAW RESPONSE STREAM] %s", responseText)
 	}
 
@@ -182,15 +190,19 @@ func Handler(c *gin.Context, resp *http.Response, promptTokens int, modelName st
 	}
 
 	// ===== SentinelProxy: 非流式响应恢复 =====
+	requestId := helper.GetRequestID(c.Request.Context())
 	if state := redaction.GetStateFromContext(c); state != nil {
 		if redaction.Config().LogRawRequests {
+			redaction.RecordRawResponseFromUpstream(requestId, responseBody)
 			logger.Infof(c.Request.Context(), "[RAW RESPONSE FROM UPSTREAM] %s", string(responseBody))
 		}
 		responseBody = redaction.UnmaskBytes(responseBody, state)
 		if redaction.Config().LogRawRequests {
+			redaction.RecordRawResponse(requestId, responseBody)
 			logger.Infof(c.Request.Context(), "[RAW RESPONSE] %s", string(responseBody))
 		}
 	} else if redaction.Config().LogRawRequests {
+		redaction.RecordRawResponse(requestId, responseBody)
 		logger.Infof(c.Request.Context(), "[RAW RESPONSE] %s", string(responseBody))
 	}
 	// ==========================================

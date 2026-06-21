@@ -10,6 +10,7 @@ import (
 	"github.com/gin-gonic/gin"
 
 	"github.com/sentinelproxy/sentinelproxy/common/config"
+	"github.com/sentinelproxy/sentinelproxy/common/helper"
 	"github.com/sentinelproxy/sentinelproxy/common/logger"
 	"github.com/sentinelproxy/sentinelproxy/relay"
 	"github.com/sentinelproxy/sentinelproxy/relay/adaptor"
@@ -94,6 +95,8 @@ func RelayTextHelper(c *gin.Context) *model.ErrorWithStatusCode {
 		}
 		requestBody = bytes.NewBuffer(jsonData)
 		if redaction.Config().LogRawRequests {
+			requestId := helper.GetRequestID(c.Request.Context())
+			redaction.RecordRawRequestAfterRedaction(requestId, jsonData)
 			logger.Infof(c.Request.Context(), "[RAW REQUEST AFTER REDACTION] %s", string(jsonData))
 		} else {
 			logger.Debugf(c.Request.Context(), "converted request after redaction: \n%s", string(jsonData))
@@ -151,6 +154,8 @@ func getRequestBody(c *gin.Context, meta *meta.Meta, textRequest *model.GeneralO
 		return nil, err
 	}
 	if redaction.Config().LogRawRequests {
+		requestId := helper.GetRequestID(c.Request.Context())
+		redaction.RecordRawRequestConverted(requestId, jsonData)
 		logger.Infof(c.Request.Context(), "[RAW REQUEST CONVERTED] %s", string(jsonData))
 	} else {
 		logger.Debugf(c.Request.Context(), "converted request: \n%s", string(jsonData))
