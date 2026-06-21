@@ -79,6 +79,23 @@ func SetApiRouter(router *gin.Engine) {
 			maskingRoute.POST("/preview", controller.PreviewMasking)
 		}
 
+		// SentinelProxy: per-user masking dashboard routes
+		maskingSelfRoute := apiRouter.Group("/masking/self")
+		maskingSelfRoute.Use(middleware.UserAuth())
+		{
+			maskingSelfRoute.GET("/sessions", controller.GetMaskingSessions)
+			maskingSelfRoute.GET("/sessions/:id", controller.GetMaskingSessionDetail)
+			maskingSelfRoute.GET("/stats", controller.GetMaskingSelfStats)
+		}
+
+		// SentinelProxy: admin masking dashboard routes
+		maskingAdminRoute := apiRouter.Group("/masking/admin")
+		maskingAdminRoute.Use(middleware.AdminAuth())
+		{
+			maskingAdminRoute.GET("/sessions", controller.AdminListMaskingSessions)
+			maskingAdminRoute.GET("/sessions/:id", controller.AdminGetMaskingSessionDetail)
+		}
+
 		channelRoute := apiRouter.Group("/channel")
 		channelRoute.Use(middleware.AdminAuth())
 		{

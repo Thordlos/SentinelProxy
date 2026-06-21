@@ -65,12 +65,15 @@ func (g *CodeGenerator) Generate(original, entityType string) string {
 // MaskingState 会话级脱敏状态
 type MaskingState struct {
 	SessionID     string            `json:"session_id"`
+	UserID        int               `json:"user_id"`        // 关联用户 ID（ dashboard 权限隔离）
+	TokenID       int               `json:"token_id"`       // 关联 token ID
 	Forward       map[string]string `json:"forward"`        // 原词 -> 代号
 	Inverse       map[string]string `json:"inverse"`        // 代号 -> 原词
 	MaskedInverse map[string]string `json:"masked_inverse"` // 掩码值 -> 原词
 	ForwardIP     map[string]string `json:"forward_ip"`     // 原IP -> 假IP（IP 格式保持随机化）
 	TokenForward  map[string]string `json:"token_forward"`  // 原值 -> token（定长 token 化会话一致性）
-	Counters      map[string]int    `json:"counters"`       // 各类型计数器
+	Counters      map[string]int    `json:"counters"`       // 各类型计数器（代号生成器使用）
+	HitCounts     map[string]int    `json:"hit_counts"`     // 各实体类型命中次数（用户可见统计）
 	UsedCodes     map[string]bool   `json:"used_codes"`     // 已使用代号
 	EntityTypes   map[string]string `json:"entity_types"`   // 代号 -> 实体类型
 	CreatedAt     time.Time         `json:"created_at"`
@@ -88,6 +91,7 @@ func NewMaskingState(sessionID string, config *RedactionConfig) *MaskingState {
 		ForwardIP:     make(map[string]string),
 		TokenForward:  make(map[string]string),
 		Counters:      make(map[string]int),
+		HitCounts:     make(map[string]int),
 		UsedCodes:     make(map[string]bool),
 		EntityTypes:   make(map[string]string),
 		CreatedAt:     time.Now(),
@@ -173,6 +177,53 @@ func (s *MaskingState) GetTokenForward(original string) string {
 	return s.TokenForward[original]
 }
 
+// IncrementHitCount 增加指定实体类型的命中计数
+func (s *MaskingState) IncrementHitCount(entityType string) {
+	if s == nil || entityType == "" {
+		return
+	}
+	if s.HitCounts == nil {
+		s.HitCounts = make(map[string]int)
+	}
+	s.HitCounts[entityType]++
+	s.LastAccessed = time.Now()
+}
+
+// TotalHits 返回总命中次数
+func (s *MaskingState) TotalHits() int {
+	if s == nil || s.HitCounts == nil {
+		return 0
+	}
+	total := 0
+	for _, c := range s.HitCounts {
+		total += c
+	}
+	return total
+}
+
+// SetUserInfo 设置会话关联的用户和 token 信息
+func (s *MaskingState) SetUserInfo(userID, tokenID int) {
+	if s == nil {
+		return
+	}
+	if s.UserID == 0 && userID > 0 {
+		s.UserID = userID
+	}
+	if s.TokenID == 0 && tokenID > 0 {
+		s.TokenID = tokenID
+	}
+	s.LastAccessed = time.Now()
+}
+
+// DisplayID 返回用于前端展示的安全会话标识（不暴露完整 session_id）
+func (s *MaskingState) DisplayID() string {
+	if s == nil || s.SessionID == "" {
+		return ""
+	}
+	hash := sha256.Sum256([]byte(s.SessionID))
+	return hex.EncodeToString(hash[:8])
+}
+
 // GetCode 获取原词对应的代号，不存在则生成
 func (s *MaskingState) GetCode(original, entityType string) string {
 	if code, ok := s.Forward[original]; ok {
@@ -242,6 +293,9 @@ func LoadMaskingState(sessionID string, config *RedactionConfig) (*MaskingState,
 	}
 	if state.TokenForward == nil {
 		state.TokenForward = make(map[string]string)
+	}
+	if state.HitCounts == nil {
+		state.HitCounts = make(map[string]int)
 	}
 	state.LastAccessed = time.Now()
 	return state, nil

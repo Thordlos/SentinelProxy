@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/sentinelproxy/sentinelproxy/common/ctxkey"
 )
 
 const (
@@ -42,10 +43,11 @@ func GetSessionManager() *SessionManager {
 
 // SessionManager 管理会话级脱敏状态
 type SessionManager struct {
-	config  *RedactionConfig
-	states  map[string]*MaskingState
-	mu      sync.RWMutex
-	stateDir string
+	config    *RedactionConfig
+	states    map[string]*MaskingState
+	mu        sync.RWMutex
+	stateDir  string
+	userIndex map[int]map[string]bool // user_id -> set of session_ids
 }
 
 // NewSessionManager 创建会话管理器
@@ -57,9 +59,10 @@ func NewSessionManager(config *RedactionConfig) *SessionManager {
 	_ = os.MkdirAll(stateDir, 0755)
 
 	return &SessionManager{
-		config:   config,
-		states:   make(map[string]*MaskingState),
-		stateDir: stateDir,
+		config:    config,
+		states:    make(map[string]*MaskingState),
+		stateDir:  stateDir,
+		userIndex: make(map[int]map[string]bool),
 	}
 }
 
@@ -97,6 +100,11 @@ func (sm *SessionManager) GetState(c *gin.Context) (*MaskingState, error) {
 	// 先检查 gin context 是否已有
 	if val, exists := c.Get(ContextKeyState); exists {
 		if state, ok := val.(*MaskingState); ok {
+			// 更新用户关联信息（可能之前未设置）
+			userID := c.GetInt(ctxkey.Id)
+			tokenID := c.GetInt(ctxkey.TokenId)
+			state.SetUserInfo(userID, tokenID)
+			sm.updateUserIndex(userID, sessionID)
 			return state, nil
 		}
 	}
@@ -106,6 +114,10 @@ func (sm *SessionManager) GetState(c *gin.Context) (*MaskingState, error) {
 
 	// 检查内存中是否已有
 	if state, ok := sm.states[sessionID]; ok {
+		userID := c.GetInt(ctxkey.Id)
+		tokenID := c.GetInt(ctxkey.TokenId)
+		state.SetUserInfo(userID, tokenID)
+		sm.updateUserIndexLocked(userID, sessionID)
 		c.Set(ContextKeyState, state)
 		return state, nil
 	}
@@ -117,7 +129,11 @@ func (sm *SessionManager) GetState(c *gin.Context) (*MaskingState, error) {
 		state = NewMaskingState(sessionID, sm.config)
 	}
 
+	userID := c.GetInt(ctxkey.Id)
+	tokenID := c.GetInt(ctxkey.TokenId)
+	state.SetUserInfo(userID, tokenID)
 	sm.states[sessionID] = state
+	sm.updateUserIndexLocked(userID, sessionID)
 	c.Set(ContextKeyState, state)
 	return state, nil
 }
@@ -139,7 +155,178 @@ func GetStateFromContext(c *gin.Context) *MaskingState {
 	return nil
 }
 
-// SaveAll 保存所有状态到磁盘
+// updateUserIndex 更新用户与会话的索引（线程安全包装）
+func (sm *SessionManager) updateUserIndex(userID int, sessionID string) {
+	if userID <= 0 || sessionID == "" {
+		return
+	}
+	sm.mu.Lock()
+	defer sm.mu.Unlock()
+	sm.updateUserIndexLocked(userID, sessionID)
+}
+
+// updateUserIndexLocked 更新用户与会话的索引（调用方已持有写锁）
+func (sm *SessionManager) updateUserIndexLocked(userID int, sessionID string) {
+	if userID <= 0 || sessionID == "" {
+		return
+	}
+	if sm.userIndex[userID] == nil {
+		sm.userIndex[userID] = make(map[string]bool)
+	}
+	sm.userIndex[userID][sessionID] = true
+}
+
+// ListUserSessions 返回指定用户的所有会话状态（内存 + 磁盘）
+func (sm *SessionManager) ListUserSessions(userID int) []*MaskingState {
+	if userID <= 0 {
+		return nil
+	}
+
+	sm.mu.RLock()
+	// 先收集内存中属于该用户的会话
+	memoryStates := make([]*MaskingState, 0)
+	if ids, ok := sm.userIndex[userID]; ok {
+		for sid := range ids {
+			if state, ok := sm.states[sid]; ok {
+				memoryStates = append(memoryStates, state)
+			}
+		}
+	}
+	sm.mu.RUnlock()
+
+	// 补充扫描磁盘：有些会话可能不在内存中
+	diskStates := make(map[string]*MaskingState)
+	files, err := filepath.Glob(filepath.Join(sm.stateDir, "*.json"))
+	if err == nil {
+		for _, file := range files {
+			sid := filepath.Base(file[:len(file)-5])
+			state, err := LoadMaskingState(sid, sm.config)
+			if err != nil || state.UserID != userID {
+				continue
+			}
+			diskStates[sid] = state
+		}
+	}
+
+	// 内存中的状态优先，避免重复
+	for _, state := range memoryStates {
+		diskStates[state.SessionID] = state
+	}
+
+	result := make([]*MaskingState, 0, len(diskStates))
+	for _, state := range diskStates {
+		result = append(result, state)
+	}
+	return result
+}
+
+// GetSession 获取指定会话的状态；若指定了 userID，则校验所有权
+func (sm *SessionManager) GetSession(sessionID string, userID int) (*MaskingState, bool) {
+	if sessionID == "" {
+		return nil, false
+	}
+
+	sm.mu.RLock()
+	if state, ok := sm.states[sessionID]; ok {
+		sm.mu.RUnlock()
+		if state.UserID != 0 && state.UserID != userID {
+			return nil, false
+		}
+		return state, true
+	}
+	sm.mu.RUnlock()
+
+	// 尝试从磁盘加载
+	state, err := LoadMaskingState(sessionID, sm.config)
+	if err != nil {
+		return nil, false
+	}
+	if state.UserID != 0 && state.UserID != userID {
+		return nil, false
+	}
+
+	// 缓存到内存
+	sm.mu.Lock()
+	sm.states[sessionID] = state
+	if state.UserID > 0 {
+		sm.updateUserIndexLocked(state.UserID, sessionID)
+	}
+	sm.mu.Unlock()
+	return state, true
+}
+
+// GetSessionAdmin 管理员获取任意会话状态（不校验所有权）
+func (sm *SessionManager) GetSessionAdmin(sessionID string) (*MaskingState, bool) {
+	if sessionID == "" {
+		return nil, false
+	}
+
+	sm.mu.RLock()
+	if state, ok := sm.states[sessionID]; ok {
+		sm.mu.RUnlock()
+		return state, true
+	}
+	sm.mu.RUnlock()
+
+	state, err := LoadMaskingState(sessionID, sm.config)
+	if err != nil {
+		return nil, false
+	}
+
+	sm.mu.Lock()
+	sm.states[sessionID] = state
+	if state.UserID > 0 {
+		sm.updateUserIndexLocked(state.UserID, sessionID)
+	}
+	sm.mu.Unlock()
+	return state, true
+}
+
+// GetUserStats 聚合指定用户所有会话的命中统计
+func (sm *SessionManager) GetUserStats(userID int) (totalSessions, totalHits int, hitCounts map[string]int) {
+	sessions := sm.ListUserSessions(userID)
+	hitCounts = make(map[string]int)
+	for _, state := range sessions {
+		totalSessions++
+		totalHits += state.TotalHits()
+		for entityType, count := range state.HitCounts {
+			hitCounts[entityType] += count
+		}
+	}
+	return totalSessions, totalHits, hitCounts
+}
+
+// ListAllSessions 返回内存 + 磁盘中的所有会话（管理员用）
+func (sm *SessionManager) ListAllSessions() []*MaskingState {
+	all := make(map[string]*MaskingState)
+
+	sm.mu.RLock()
+	for sid, state := range sm.states {
+		all[sid] = state
+	}
+	sm.mu.RUnlock()
+
+	files, err := filepath.Glob(filepath.Join(sm.stateDir, "*.json"))
+	if err == nil {
+		for _, file := range files {
+			sid := filepath.Base(file[:len(file)-5])
+			if _, ok := all[sid]; ok {
+				continue
+			}
+			state, err := LoadMaskingState(sid, sm.config)
+			if err != nil {
+				continue
+			}
+			all[sid] = state
+		}
+	}
+
+	result := make([]*MaskingState, 0, len(all))
+	for _, state := range all {
+		result = append(result, state)
+	}
+	return result
+}
 func (sm *SessionManager) SaveAll() error {
 	sm.mu.RLock()
 	defer sm.mu.RUnlock()
@@ -174,6 +361,9 @@ func (sm *SessionManager) CleanupExpired() error {
 	for sid, state := range sm.states {
 		if state.LastAccessed.Before(cutoff) {
 			delete(sm.states, sid)
+			if state.UserID > 0 && sm.userIndex[state.UserID] != nil {
+				delete(sm.userIndex[state.UserID], sid)
+			}
 		}
 	}
 

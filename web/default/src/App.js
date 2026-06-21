@@ -24,6 +24,7 @@ import Chat from './pages/Chat';
 import LarkOAuth from './components/LarkOAuth';
 import Dashboard from './pages/Dashboard';
 import Masking from './pages/Masking';
+import MaskingDashboard from './pages/MaskingDashboard';
 
 const Home = lazy(() => import('./pages/Home'));
 const About = lazy(() => import('./pages/About'));
@@ -194,6 +195,16 @@ function App() {
           <PrivateRoute>
             <Suspense fallback={<Loading></Loading>}>
               <Masking />
+            </Suspense>
+          </PrivateRoute>
+        }
+      />
+      <Route
+        path='/masking/dashboard'
+        element={
+          <PrivateRoute>
+            <Suspense fallback={<Loading></Loading>}>
+              <MaskingDashboard />
             </Suspense>
           </PrivateRoute>
         }

@@ -47,6 +47,11 @@ let headerButtons = [
     admin: true,
   },
   {
+    name: 'header.masking_dashboard',
+    to: '/masking/dashboard',
+    icon: 'shield',
+  },
+  {
     name: 'header.dashboard',
     to: '/dashboard',
     icon: 'chart bar',

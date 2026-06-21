@@ -1184,3 +1184,168 @@ func TestRandomizeOperation(t *testing.T) {
 	}
 }
 
+func TestMaskingStateHitCounts(t *testing.T) {
+	cfg := newTestConfig()
+	cfg.BuiltInEntities = []BuiltInEntityConfig{
+		{Type: "PHONE_NUMBER", Name: "手机号", Enabled: true, Operator: OperatorConfig{Type: OpSymbolize}},
+		{Type: "EMAIL_ADDRESS", Name: "邮箱", Enabled: true, Operator: OperatorConfig{Type: OpSymbolize}},
+	}
+	if err := Init(cfg); err != nil {
+		t.Fatalf("Init failed: %v", err)
+	}
+
+	state := NewMaskingState("test_hits", cfg)
+	text := "手机13812345678，邮箱 alice@example.com，手机13812345678"
+	if _, err := MaskText(text, state); err != nil {
+		t.Fatalf("MaskText failed: %v", err)
+	}
+
+	if state.HitCounts["PHONE_NUMBER"] != 2 {
+		t.Errorf("expected PHONE_NUMBER hit count 2, got %d", state.HitCounts["PHONE_NUMBER"])
+	}
+	if state.HitCounts["EMAIL_ADDRESS"] != 1 {
+		t.Errorf("expected EMAIL_ADDRESS hit count 1, got %d", state.HitCounts["EMAIL_ADDRESS"])
+	}
+	if state.TotalHits() != 3 {
+		t.Errorf("expected total hits 3, got %d", state.TotalHits())
+	}
+}
+
+func TestMaskingStateDisplayID(t *testing.T) {
+	cfg := newTestConfig()
+	state := NewMaskingState("auth_abc123def456", cfg)
+	if state.DisplayID() == "" {
+		t.Errorf("expected non-empty display id")
+	}
+	if len(state.DisplayID()) != 16 {
+		t.Errorf("expected display id length 16, got %d", len(state.DisplayID()))
+	}
+}
+
+func TestSessionManagerUserIndex(t *testing.T) {
+	cfg := newTestConfig()
+	sm := NewSessionManager(cfg)
+
+	state1 := NewMaskingState("session_1", cfg)
+	state1.SetUserInfo(42, 100)
+	state2 := NewMaskingState("session_2", cfg)
+	state2.SetUserInfo(42, 101)
+	state3 := NewMaskingState("session_3", cfg)
+	state3.SetUserInfo(99, 200)
+
+	sm.mu.Lock()
+	sm.states["session_1"] = state1
+	sm.states["session_2"] = state2
+	sm.states["session_3"] = state3
+	sm.updateUserIndexLocked(42, "session_1")
+	sm.updateUserIndexLocked(42, "session_2")
+	sm.updateUserIndexLocked(99, "session_3")
+	sm.mu.Unlock()
+
+	user42 := sm.ListUserSessions(42)
+	if len(user42) != 2 {
+		t.Errorf("expected 2 sessions for user 42, got %d", len(user42))
+	}
+
+	user99 := sm.ListUserSessions(99)
+	if len(user99) != 1 {
+		t.Errorf("expected 1 session for user 99, got %d", len(user99))
+	}
+
+	totalSessions, totalHits, hitCounts := sm.GetUserStats(42)
+	if totalSessions != 2 {
+		t.Errorf("expected total sessions 2, got %d", totalSessions)
+	}
+	if totalHits != 0 {
+		t.Errorf("expected total hits 0, got %d", totalHits)
+	}
+	if len(hitCounts) != 0 {
+		t.Errorf("expected empty hit counts, got %v", hitCounts)
+	}
+}
+
+func TestSessionManagerGetSessionOwnership(t *testing.T) {
+	cfg := newTestConfig()
+	sm := NewSessionManager(cfg)
+
+	state := NewMaskingState("owned_session", cfg)
+	state.SetUserInfo(42, 100)
+
+	sm.mu.Lock()
+	sm.states["owned_session"] = state
+	sm.updateUserIndexLocked(42, "owned_session")
+	sm.mu.Unlock()
+
+	// 所有者可以访问
+	got, ok := sm.GetSession("owned_session", 42)
+	if !ok || got.SessionID != "owned_session" {
+		t.Errorf("owner should be able to access their session")
+	}
+
+	// 其他用户不能访问
+	_, ok = sm.GetSession("owned_session", 99)
+	if ok {
+		t.Errorf("other user should not access owner's session")
+	}
+
+	// 匿名（userID=0）不能访问已归属会话
+	_, ok = sm.GetSession("owned_session", 0)
+	if ok {
+		t.Errorf("anonymous should not access owned session")
+	}
+
+	// 管理员模式可以访问
+	got, ok = sm.GetSessionAdmin("owned_session")
+	if !ok || got.SessionID != "owned_session" {
+		t.Errorf("admin should be able to access any session")
+	}
+}
+
+func TestMaskingStatePersistenceWithUserInfo(t *testing.T) {
+	cfg := newTestConfig()
+	state := NewMaskingState("persist_user_test", cfg)
+	state.SetUserInfo(42, 100)
+	state.IncrementHitCount("PHONE_NUMBER")
+	state.IncrementHitCount("EMAIL_ADDRESS")
+
+	if err := state.Save(); err != nil {
+		t.Fatalf("Save failed: %v", err)
+	}
+	defer os.Remove(StateFilePath(state.SessionID))
+
+	loaded, err := LoadMaskingState(state.SessionID, cfg)
+	if err != nil {
+		t.Fatalf("LoadMaskingState failed: %v", err)
+	}
+
+	if loaded.UserID != 42 {
+		t.Errorf("expected user_id 42, got %d", loaded.UserID)
+	}
+	if loaded.TokenID != 100 {
+		t.Errorf("expected token_id 100, got %d", loaded.TokenID)
+	}
+	if loaded.HitCounts["PHONE_NUMBER"] != 1 {
+		t.Errorf("expected PHONE_NUMBER hit count 1, got %d", loaded.HitCounts["PHONE_NUMBER"])
+	}
+	if loaded.HitCounts["EMAIL_ADDRESS"] != 1 {
+		t.Errorf("expected EMAIL_ADDRESS hit count 1, got %d", loaded.HitCounts["EMAIL_ADDRESS"])
+	}
+}
+
+func TestMaskingStateUserInfoMerge(t *testing.T) {
+	cfg := newTestConfig()
+	state := NewMaskingState("merge_test", cfg)
+
+	// 第一次设置有效值
+	state.SetUserInfo(42, 100)
+	// 第二次尝试覆盖不应生效
+	state.SetUserInfo(99, 200)
+
+	if state.UserID != 42 {
+		t.Errorf("expected user_id to remain 42, got %d", state.UserID)
+	}
+	if state.TokenID != 100 {
+		t.Errorf("expected token_id to remain 100, got %d", state.TokenID)
+	}
+}
+

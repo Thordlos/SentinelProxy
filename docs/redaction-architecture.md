@@ -29,12 +29,15 @@
 ```go
 type MaskingState struct {
     SessionID     string            `json:"session_id"`
+    UserID        int               `json:"user_id"`        // 关联用户 ID
+    TokenID       int               `json:"token_id"`       // 关联 token ID
     Forward       map[string]string `json:"forward"`        // 原词 -> 代号
     Inverse       map[string]string `json:"inverse"`        // 代号 -> 原词
     MaskedInverse map[string]string `json:"masked_inverse"` // 替换值 -> 原词
     ForwardIP     map[string]string `json:"forward_ip"`     // 原IP -> 假IP
     TokenForward  map[string]string `json:"token_forward"`  // 原值 -> token
-    Counters      map[string]int    `json:"counters"`
+    Counters      map[string]int    `json:"counters"`       // 各类型计数器
+    HitCounts     map[string]int    `json:"hit_counts"`     // 各实体类型命中次数
     UsedCodes     map[string]bool   `json:"used_codes"`
     EntityTypes   map[string]string `json:"entity_types"`
     CreatedAt     time.Time         `json:"created_at"`
@@ -301,15 +304,39 @@ logs/masking/raw/{request_id}.json
 
 ### 8.1 API
 
-| 接口 | 作用 |
-|------|------|
-| `GET /api/masking/config` | 获取当前配置 |
-| `POST /api/masking/config` | 保存配置并热加载 |
-| `GET /api/masking/builtin` | 获取内置实体列表（含 `Pattern`） |
-| `POST /api/masking/preview` | 预览脱敏/还原效果 |
-| `GET /api/log/:id/raw` | 查看指定日志的原始请求/响应（需权限） |
+| 接口 | 作用 | 权限 |
+|------|------|------|
+| `GET /api/masking/config` | 获取当前配置 | root |
+| `POST /api/masking/config` | 保存配置并热加载 | root |
+| `GET /api/masking/builtin` | 获取内置实体列表（含 `Pattern`） | root |
+| `POST /api/masking/preview` | 预览脱敏/还原效果 | root |
+| `GET /api/masking/self/stats` | 当前用户脱敏统计聚合 | 登录用户 |
+| `GET /api/masking/self/sessions` | 当前用户会话列表 | 登录用户 |
+| `GET /api/masking/self/sessions/:id` | 当前用户指定会话的映射详情 | 登录用户 |
+| `GET /api/masking/admin/sessions?user_id=` | 管理员查看会话列表（user_id=0 表示全部） | admin |
+| `GET /api/masking/admin/sessions/:id` | 管理员查看任意会话详情 | admin |
+| `GET /api/log/:id/raw` | 查看指定日志的原始请求/响应 | 登录用户（仅自己的日志） |
 
-### 8.2 前端操作符下拉
+### 8.2 用户映射看板
+
+前端新增「脱敏看板」页面（`/masking/dashboard`），登录用户可以：
+
+1. **实时查看聚合统计**：总会话数、总脱敏命中次数、各实体类型命中分布。
+2. **查看会话列表**：每个会话展示安全会话标识、创建/最后访问时间、实体数量、命中次数。
+3. **查看会话详情**：点击会话后展示：
+   - 符号化映射（`<SENTINEL>CODE</SENTINEL>` ↔ 原始值）
+   - 掩码 / 格式保持随机化映射（假值 ↔ 原始值）
+   - IP 映射（原 IP ↔ 假 IP）
+   - Token 映射（原值 ↔ token）
+
+页面每 5 秒自动轮询 `/api/masking/self/stats` 和 `/api/masking/self/sessions`，实现近实时更新。会话 ID 在后端做了一次 SHA-256 摘要后返回给前端，避免暴露原始 `session_id`（可能包含授权头哈希或 IP 信息）。
+
+实现位置：
+- 后端：`controller/masking.go` 的 `GetMaskingSessions` / `GetMaskingSessionDetail` / `GetMaskingSelfStats`
+- 后端：`relay/redaction/session_manager.go` 的 `ListUserSessions` / `GetUserStats`
+- 前端：`web/default/src/components/MaskingDashboard.js`
+
+### 8.3 前端操作符下拉
 
 `web/default/src/components/MaskingSetting.js` 中定义：
 

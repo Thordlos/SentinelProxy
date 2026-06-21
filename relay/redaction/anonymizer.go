@@ -48,6 +48,9 @@ func (a *Anonymizer) Anonymize(text string, entities []Entity, state *MaskingSta
 
 		replacement := a.applyOperator(entity.Text, code, entity.Type, entity.Operator, state)
 		text = text[:entity.Start] + replacement + text[entity.End:]
+
+		// 统计该实体类型的命中次数
+		state.IncrementHitCount(entity.Type)
 	}
 
 	// 反转 mappings 使其按文本出现顺序排列
