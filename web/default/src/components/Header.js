@@ -82,7 +82,7 @@ if (localStorage.getItem('chat_link')) {
 }
 
 const Header = () => {
-  const { t, i18n } = useTranslation();
+  const { t } = useTranslation();
   const [userState, userDispatch] = useContext(UserContext);
   let navigate = useNavigate();
 
@@ -138,16 +138,6 @@ const Header = () => {
     });
   };
 
-  // Add language switcher dropdown
-  const languageOptions = [
-    { key: 'zh', text: '中文', value: 'zh' },
-    { key: 'en', text: 'English', value: 'en' },
-  ];
-
-  const changeLanguage = (language) => {
-    i18n.changeLanguage(language);
-  };
-
   if (isMobile()) {
     return (
       <>
@@ -189,20 +179,6 @@ const Header = () => {
           <Segment style={{ marginTop: 0, borderTop: '0' }}>
             <Menu secondary vertical style={{ width: '100%', margin: 0 }}>
               {renderButtons(true)}
-              <Menu.Item>
-                <Dropdown
-                  selection
-                  trigger={
-                    <Icon
-                      name='language'
-                      style={{ margin: 0, fontSize: '18px' }}
-                    />
-                  }
-                  options={languageOptions}
-                  value={i18n.language}
-                  onChange={(_, { value }) => changeLanguage(value)}
-                />
-              </Menu.Item>
               <Menu.Item>
                 {userState.user ? (
                   <Button onClick={logout} style={{ color: '#666666' }}>
@@ -269,21 +245,6 @@ const Header = () => {
           </Menu.Item>
           {renderButtons(false)}
           <Menu.Menu position='right'>
-            <Dropdown
-              item
-              trigger={
-                <Icon name='language' style={{ margin: 0, fontSize: '18px' }} />
-              }
-              options={languageOptions}
-              value={i18n.language}
-              onChange={(_, { value }) => changeLanguage(value)}
-              style={{
-                fontSize: '16px',
-                fontWeight: '400',
-                color: '#666',
-                padding: '0 10px',
-              }}
-            />
             {userState.user ? (
               <Dropdown
                 text={userState.user.username}
