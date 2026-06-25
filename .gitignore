@@ -15,3 +15,9 @@ temp
 .DS_Store
 /sentinelproxy
 /SentinelProxy
+
+# Python NER service
+ner_service/venv/
+ner_service/.venv/
+ner_service/__pycache__/
+*.pyc

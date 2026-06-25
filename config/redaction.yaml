@@ -46,18 +46,18 @@ built_in_entities:
         ip_random_preserve_bits: 0
     - type: PERSON_NAME
       name: 姓名
-      enabled: false
+      enabled: true
       operator:
         type: symbolize
     - type: USER_NAME
       name: 用户名
-      enabled: false
+      enabled: true
       operator:
         type: symbolize
 static_rules: []
 dynamic_rules: []
 ner:
-    enabled: false
+    enabled: true
     endpoint: http://127.0.0.1:8000/analyze
     timeout: 50ms
     cache_ttl: 5m
