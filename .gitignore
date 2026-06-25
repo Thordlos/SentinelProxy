@@ -21,3 +21,6 @@ ner_service/venv/
 ner_service/.venv/
 ner_service/__pycache__/
 *.pyc
+
+# tiktoken cache
+/tiktoken/
