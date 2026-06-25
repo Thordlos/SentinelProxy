@@ -110,10 +110,25 @@ func (fa *FieldAnalyzer) matchFieldValues(text, entityType string, re *regexp.Re
 	return results
 }
 
-// matchSurnameNames 基于中文姓氏 + 1~3 个汉字做启发式姓名识别。
+// 常见中文虚词/助词/常见非人名用字，用于过滤假阳性。
+var commonParticles = map[rune]bool{
+	'的': true, '是': true, '在': true, '和': true, '了': true, '着': true, '过': true,
+	'把': true, '被': true, '给': true, '让': true, '向': true, '从': true, '到': true,
+	'对': true, '为': true, '与': true, '及': true, '或': true, '而': true, '但': true,
+	'因': true, '所': true, '等': true, '呢': true, '吗': true, '吧': true, '啊': true,
+	'哦': true, '呀': true, '都': true, '还': true, '又': true, '也': true, '就': true,
+	'才': true, '却': true, '并': true, '且': true, '虽': true, '这': true, '那': true,
+	'有': true, '没': true, '不': true, '很': true, '太': true, '要': true, '会': true,
+	'能': true, '可': true, '已': true, '将': true, '以': true, '则': true, '其': true,
+	'上': true, '下': true, '中': true, '大': true, '小': true, '多': true, '少': true,
+}
+
+// matchSurnameNames 基于中文姓氏 + 1~2 个汉字做启发式姓名识别。
+// 增加虚词过滤：如果姓氏后面跟的是常见助词/介词，则忽略这一条。
 func (fa *FieldAnalyzer) matchSurnameNames(text string) []Entity {
 	var results []Entity
 	op := fa.cfg.GetBuiltInEntityOperator("PERSON_NAME")
+	runes := []rune(text)
 
 	matches := fa.surnameRe.FindAllStringSubmatchIndex(text, -1)
 	for _, m := range matches {
@@ -122,9 +137,19 @@ func (fa *FieldAnalyzer) matchSurnameNames(text string) []Entity {
 		}
 		start, end := m[2], m[3]
 		name := text[start:end]
-		// 姓名长度 2~4 个汉字
+		// 姓名长度 2~3 个汉字
 		runeLen := utf8.RuneCountInString(name)
-		if runeLen < 2 || runeLen > 4 {
+		if runeLen < 2 || runeLen > 3 {
+			continue
+		}
+		// 过滤：匹配到的最后一个字符如果是虚词，跳过
+		nameRunes := []rune(name)
+		if commonParticles[nameRunes[len(nameRunes)-1]] {
+			continue
+		}
+		// 过滤：匹配后面的第一个字符如果是虚词，跳过（如「张三也」后跟「也」时）
+		endRuneIdx := utf8.RuneCountInString(text[:end])
+		if endRuneIdx < len(runes) && commonParticles[runes[endRuneIdx]] {
 			continue
 		}
 		results = append(results, Entity{
@@ -168,7 +193,7 @@ func buildSurnameRegex() *regexp.Regexp {
 		"严", "覃", "武", "戴", "莫", "孔", "常", "汤", "赖", "萧",
 		"傅", "阎", "包", "储", "侯", "车", "江", "池", "汪", "沃",
 	}
-	// 姓氏后接 1~3 个汉字。不做前置边界限制，因为中文文本中姓名前面往往也是汉字。
-	pattern := `((?:` + strings.Join(surnames, "|") + `)[\p{Han}]{1,3})`
+	// 姓氏后接 1~2 个汉字（常见中文名为 2~3 字）。
+	pattern := `((?:` + strings.Join(surnames, "|") + `)[\p{Han}]{1,2})`
 	return regexp.MustCompile(pattern)
 }
