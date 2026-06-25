@@ -279,7 +279,44 @@ static_rules: []
 dynamic_rules: []
 ```
 
-### 7.4 原始请求/响应查看
+### 7.4 人名/用户名识别（新增）
+
+除正则型 PII 外，系统新增两级人名/用户名识别：
+
+1. **字段名 + 中文姓氏规则**（`relay/redaction/field_analyzer.go`）
+   - 识别 JSON / HTTP 头 / JWT claim 中的常见字段名，如 `name`、`real_name`、`userName`、`姓名`、`用户名`。
+   - 对自由文本做中文姓氏启发式匹配（常见 100+ 姓氏 + 1~3 个汉字），置信度较低，避免高误报。
+   - 默认操作符为 `symbolize`。
+
+2. **本地 NER 服务**（`ner_service/`）
+   - FastAPI + spaCy（默认 `zh_core_web_sm`）提供 `POST /analyze`。
+   - 支持 LRU + TTL 缓存、多 worker 启动。
+   - SentinelProxy 通过 `modelAnalyzer` 调用，超时自动回退到规则引擎，不影响主链路。
+
+配置示例：
+
+```yaml
+built_in_entities:
+    - type: PERSON_NAME
+      name: 姓名
+      enabled: false
+      operator:
+        type: symbolize
+    - type: USER_NAME
+      name: 用户名
+      enabled: false
+      operator:
+        type: symbolize
+ner:
+    enabled: false
+    endpoint: http://127.0.0.1:8000/analyze
+    timeout: 50ms
+    cache_ttl: 5m
+```
+
+启用方式：在 Web 管理界面打开 `PERSON_NAME` / `USER_NAME` 开关，并将 `ner.enabled` 设为 `true`（如需模型增强）。
+
+### 7.5 原始请求/响应查看
 
 开启 `log_raw_requests: true` 后，系统会在处理请求/响应时把关键阶段的内容写入结构化文件：
 

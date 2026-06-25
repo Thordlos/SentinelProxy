@@ -54,6 +54,22 @@ func BuiltInRules() []Rule {
 			Score:      1.0,
 			Operator:   OperatorConfig{Type: OpSymbolize},
 		},
+		{
+			ID:         "person_name_heuristic",
+			Name:       "姓名（启发式）",
+			EntityType: "PERSON_NAME",
+			Pattern:    `\b[\p{Han}]{2,4}\b`,
+			Score:      0.25,
+			Operator:   OperatorConfig{Type: OpSymbolize},
+		},
+		{
+			ID:         "username_at_mention",
+			Name:       "用户名（@提及）",
+			EntityType: "USER_NAME",
+			Pattern:    `@\w+`,
+			Score:      0.7,
+			Operator:   OperatorConfig{Type: OpSymbolize},
+		},
 	}
 }
 

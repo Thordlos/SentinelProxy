@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"sync"
+	"time"
 
 	"gopkg.in/yaml.v3"
 )
@@ -188,6 +189,17 @@ func applyEnvOverrides(cfg *RedactionConfig) {
 	}
 	if v := os.Getenv("SENTINEL_REDACTION_LOG_RAW_REQUESTS"); v != "" {
 		cfg.LogRawRequests = parseBool(v, cfg.LogRawRequests)
+	}
+	if v := os.Getenv("SENTINEL_REDACTION_NER_ENABLED"); v != "" {
+		cfg.NER.Enabled = parseBool(v, cfg.NER.Enabled)
+	}
+	if v := os.Getenv("SENTINEL_REDACTION_NER_ENDPOINT"); v != "" {
+		cfg.NER.Endpoint = v
+	}
+	if v := os.Getenv("SENTINEL_REDACTION_NER_TIMEOUT"); v != "" {
+		if d, err := time.ParseDuration(v); err == nil {
+			cfg.NER.Timeout = d
+		}
 	}
 }
 

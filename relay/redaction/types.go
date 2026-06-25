@@ -1,5 +1,7 @@
 package redaction
 
+import "time"
+
 // OperatorType 定义脱敏操作类型
 type OperatorType string
 
@@ -120,6 +122,25 @@ type BuiltInEntityConfig struct {
 	Pattern  string         `yaml:"-" json:"pattern,omitempty"` // 仅 API 返回，不持久化
 }
 
+// NERConfig 配置本地 NER 服务
+// 用于人名/用户名等需要模型推理的实体识别
+type NERConfig struct {
+	Enabled   bool          `yaml:"enabled" json:"enabled"`
+	Endpoint  string        `yaml:"endpoint" json:"endpoint"`
+	Timeout   time.Duration `yaml:"timeout" json:"timeout"`
+	CacheTTL  time.Duration `yaml:"cache_ttl" json:"cache_ttl"`
+}
+
+// DefaultNERConfig 返回默认 NER 配置
+func DefaultNERConfig() NERConfig {
+	return NERConfig{
+		Enabled:  false,
+		Endpoint: "http://127.0.0.1:8000/analyze",
+		Timeout:  50 * time.Millisecond,
+		CacheTTL: 5 * time.Minute,
+	}
+}
+
 // RedactionConfig 脱敏总配置
 type RedactionConfig struct {
 	Enabled         bool                  `yaml:"enabled" json:"enabled"`
@@ -136,6 +157,7 @@ type RedactionConfig struct {
 	BuiltInEntities []BuiltInEntityConfig `yaml:"built_in_entities" json:"built_in_entities"`
 	StaticRules     []Rule                `yaml:"static_rules" json:"static_rules"`
 	DynamicRules    []Rule                `yaml:"dynamic_rules" json:"dynamic_rules"`
+	NER             NERConfig             `yaml:"ner" json:"ner"`
 }
 
 // DefaultRedactionConfig 返回默认配置
@@ -161,7 +183,10 @@ func DefaultRedactionConfig() RedactionConfig {
 			{Type: "BANK_CARD", Name: "银行卡", Enabled: true, Operator: OperatorConfig{Type: OpRandomize}},
 			{Type: "LICENSE_PLATE", Name: "车牌号", Enabled: false, Operator: OperatorConfig{Type: OpRandomize}},
 			{Type: "IP_ADDRESS", Name: "IP地址", Enabled: false, Operator: OperatorConfig{Type: OpRandomize}},
+			{Type: "PERSON_NAME", Name: "姓名", Enabled: false, Operator: OperatorConfig{Type: OpSymbolize}},
+			{Type: "USER_NAME", Name: "用户名", Enabled: false, Operator: OperatorConfig{Type: OpSymbolize}},
 		},
+		NER: DefaultNERConfig(),
 	}
 }
 

@@ -164,36 +164,7 @@ func (e *RuleEngine) Analyze(text string, entities []string) ([]Entity, error) {
 	})
 
 	// 处理重叠：保留最长匹配；长度相同时保留数字位数精确度更高的
-	results = mergeOverlapping(results)
-	return results, nil
-}
-
-// mergeOverlapping 处理重叠实体，保留最长匹配；长度相同时保留数字位数精确度更高的
-func mergeOverlapping(entities []Entity) []Entity {
-	if len(entities) == 0 {
-		return entities
-	}
-
-	var merged []Entity
-	current := entities[0]
-	for i := 1; i < len(entities); i++ {
-		next := entities[i]
-		// 如果 next 与 current 重叠，选择更长的；长度相同则选数字位数精确度更高的
-		if next.Start < current.End {
-			nextLen := next.End - next.Start
-			currLen := current.End - current.Start
-			if nextLen > currLen {
-				current = next
-			} else if nextLen == currLen && next.DigitPrecision > current.DigitPrecision {
-				current = next
-			}
-		} else {
-			merged = append(merged, current)
-			current = next
-		}
-	}
-	merged = append(merged, current)
-	return merged
+	return MergeEntities(results), nil
 }
 
 func contains(slice []string, item string) bool {

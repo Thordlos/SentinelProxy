@@ -3,11 +3,14 @@ package redaction
 import (
 	"encoding/json"
 	"net"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"regexp"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/sentinelproxy/sentinelproxy/relay/model"
 )
@@ -18,6 +21,21 @@ func newTestConfig() *RedactionConfig {
 	cfg.StateDir = filepath.Join(os.TempDir(), "sentinel_test")
 	_ = os.MkdirAll(cfg.StateDir, 0755)
 	return &cfg
+}
+
+func enableEntityType(cfg *RedactionConfig, entityType string) {
+	for i := range cfg.BuiltInEntities {
+		if cfg.BuiltInEntities[i].Type == entityType {
+			cfg.BuiltInEntities[i].Enabled = true
+			return
+		}
+	}
+	cfg.BuiltInEntities = append(cfg.BuiltInEntities, BuiltInEntityConfig{
+		Type:     entityType,
+		Name:     entityType,
+		Enabled:  true,
+		Operator: OperatorConfig{Type: OpSymbolize},
+	})
 }
 
 func TestBuiltInRules(t *testing.T) {
@@ -1347,5 +1365,164 @@ func TestMaskingStateUserInfoMerge(t *testing.T) {
 	if state.TokenID != 100 {
 		t.Errorf("expected token_id to remain 100, got %d", state.TokenID)
 	}
+}
+
+func TestFieldAnalyzerJSONKeyValue(t *testing.T) {
+	cfg := DefaultRedactionConfig()
+	enableEntityType(&cfg, "PERSON_NAME")
+	enableEntityType(&cfg, "USER_NAME")
+	fa := NewFieldAnalyzer(&cfg)
+	text := `{"name":"张三","age":30,"username":"zhangsan123"}`
+	ents, err := fa.Analyze(text, nil)
+	if err != nil {
+		t.Fatalf("Analyze failed: %v", err)
+	}
+
+	var gotName, gotUser bool
+	for _, e := range ents {
+		if e.Type == "PERSON_NAME" && e.Text == "张三" {
+			gotName = true
+		}
+		if e.Type == "USER_NAME" && e.Text == "zhangsan123" {
+			gotUser = true
+		}
+	}
+	if !gotName {
+		t.Errorf("expected PERSON_NAME 张三, got %+v", ents)
+	}
+	if !gotUser {
+		t.Errorf("expected USER_NAME zhangsan123, got %+v", ents)
+	}
+}
+
+func TestFieldAnalyzerSurnameMatch(t *testing.T) {
+	cfg := DefaultRedactionConfig()
+	enableEntityType(&cfg, "PERSON_NAME")
+	fa := NewFieldAnalyzer(&cfg)
+	text := "他叫李四，电话是13812345678"
+	ents, err := fa.Analyze(text, nil)
+	if err != nil {
+		t.Fatalf("Analyze failed: %v", err)
+	}
+
+	var gotName bool
+	for _, e := range ents {
+		if e.Type == "PERSON_NAME" && e.Text == "李四" {
+			gotName = true
+		}
+	}
+	if !gotName {
+		t.Errorf("expected PERSON_NAME 李四, got %+v", ents)
+	}
+}
+
+func TestFieldAnalyzerFiltersEntityType(t *testing.T) {
+	cfg := DefaultRedactionConfig()
+	fa := NewFieldAnalyzer(&cfg)
+	text := `{"name":"张三","username":"zhangsan123"}`
+	ents, err := fa.Analyze(text, []string{"PERSON_NAME"})
+	if err != nil {
+		t.Fatalf("Analyze failed: %v", err)
+	}
+	for _, e := range ents {
+		if e.Type == "USER_NAME" {
+			t.Errorf("expected USER_NAME filtered out, got %+v", e)
+		}
+	}
+}
+
+func TestModelAnalyzerIntegration(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewEncoder(w).Encode(map[string]interface{}{
+			"entities": []map[string]interface{}{
+				{"type": "PERSON_NAME", "start": 3, "end": 5, "text": "张三", "score": 0.9},
+			},
+		})
+	}))
+	defer server.Close()
+
+	cfg := DefaultRedactionConfig()
+	ma := newModelAnalyzer(NERConfig{
+		Enabled:  true,
+		Endpoint: server.URL + "/analyze",
+		Timeout:  1 * time.Second,
+	}, &cfg)
+
+	ents, err := ma.Analyze("他是张三", nil)
+	if err != nil {
+		t.Fatalf("Analyze failed: %v", err)
+	}
+	if len(ents) != 1 || ents[0].Text != "张三" {
+		t.Errorf("expected 1 entity 张三, got %+v", ents)
+	}
+	if ents[0].Operator.Type != OpSymbolize {
+		t.Errorf("expected symbolize operator, got %+v", ents[0].Operator)
+	}
+}
+
+func TestModelAnalyzerFallback(t *testing.T) {
+	cfg := DefaultRedactionConfig()
+	ma := newModelAnalyzer(NERConfig{
+		Enabled:  true,
+		Endpoint: "http://127.0.0.1:59999/analyze", // 无效端口
+		Timeout:  10 * time.Millisecond,
+	}, &cfg)
+
+	ents, err := ma.Analyze("我的名字是张三", nil)
+	if err != nil {
+		t.Errorf("model analyzer should fallback gracefully, got error: %v", err)
+	}
+	if len(ents) != 0 {
+		t.Errorf("expected empty fallback, got %d entities", len(ents))
+	}
+}
+
+func TestMergeEntitiesOverlap(t *testing.T) {
+	entities := []Entity{
+		{Type: "PERSON_NAME", Start: 0, End: 4, Text: "张三", Score: 0.9},
+		{Type: "USER_NAME", Start: 0, End: 4, Text: "张三", Score: 0.6},
+	}
+	merged := MergeEntities(entities)
+	if len(merged) != 1 {
+		t.Errorf("expected 1 entity after merge, got %d", len(merged))
+	}
+	if merged[0].Type != "PERSON_NAME" {
+		t.Errorf("expected PERSON_NAME to win (higher score), got %s", merged[0].Type)
+	}
+}
+
+func TestCompositeAnalyzerNameAndPhone(t *testing.T) {
+	cfg := newTestConfig()
+	cfg.BuiltInEntities = []BuiltInEntityConfig{
+		{Type: "PHONE_NUMBER", Name: "手机号", Enabled: true, Operator: OperatorConfig{Type: OpSymbolize}},
+		{Type: "PERSON_NAME", Name: "姓名", Enabled: true, Operator: OperatorConfig{Type: OpSymbolize}},
+		{Type: "USER_NAME", Name: "用户名", Enabled: true, Operator: OperatorConfig{Type: OpSymbolize}},
+	}
+	if err := Init(cfg); err != nil {
+		t.Fatalf("Init failed: %v", err)
+	}
+
+	state := NewMaskingState("test_composite", cfg)
+	text := `{"real_name":"王五","phone":"13812345678","username":"wangwu"}`
+	masked, err := MaskText(text, state)
+	if err != nil {
+		t.Fatalf("MaskText failed: %v", err)
+	}
+
+	if strings.Contains(masked, "王五") {
+		t.Errorf("real_name should be redacted, got: %s", masked)
+	}
+	if strings.Contains(masked, "wangwu") {
+		t.Errorf("username should be redacted, got: %s", masked)
+	}
+	if strings.Contains(masked, "13812345678") {
+		t.Errorf("phone should be redacted, got: %s", masked)
+	}
+
+	restored := UnmaskText(masked, state)
+	if restored != text {
+		t.Errorf("round-trip failed: expected %q, got %q", text, restored)
+	}
+	t.Logf("masked: %s", masked)
 }
 
